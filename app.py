@@ -7,8 +7,8 @@ st.title("❤️ Heart Disease Prediction App")
 st.write("Enter patient details and predict 10-year CHD risk.")
 
 # Load model + scaler
-model = joblib.load("final_best_model.joblib")
-scaler = joblib.load("final_scaler.joblib")
+model = joblib.load("best_heart_chd_model.joblib")
+scaler = joblib.load("scaler_chd.joblib")
 
 def to_bin(x):
     return 1 if x in ("Yes","Male") else 0
@@ -32,7 +32,7 @@ glucose = st.number_input("Glucose", 40, 300, 90)
 
 if st.button("Predict"):
 
-    data = np.array([[
+    data = np.array([[ 
         to_bin(male), age, education, to_bin(currentSmoker), cigsPerDay,
         to_bin(BPMeds), to_bin(prevalentStroke), to_bin(prevalentHyp),
         to_bin(diabetes), totChol, sysBP, diaBP, BMI, heartRate, glucose
@@ -46,3 +46,4 @@ if st.button("Predict"):
         st.error(f"HIGH RISK (Probability: {prob:.2f})")
     else:
         st.success(f"LOW RISK (Probability: {prob:.2f})")
+
