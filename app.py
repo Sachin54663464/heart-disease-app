@@ -1,10 +1,9 @@
-# app.py — Premium Apple-style Clinical Dashboard with SHAP Explainability
-# Expects in repo:
+# app.py — Final premium Clinical CHD Dashboard (fixed)
+# Expects model files in repo root:
 #   - best_heart_chd_model.joblib
 #   - scaler_chd.joblib
 #
-# Requirements (add to requirements.txt):
-# streamlit, numpy, pandas, scikit-learn, joblib, plotly, matplotlib, fpdf, shap, kaleido
+# Add heavy libs to requirements.txt if you want SHAP/kaleido functionality.
 
 import streamlit as st
 import joblib
@@ -16,30 +15,31 @@ from fpdf import FPDF
 import io
 import matplotlib.pyplot as plt
 
-# Optional heavy import - shap. If not available, app will still run but SHAP tab will show message.
+# SHAP is optional — app will warn if it's not installed
 try:
     import shap
 except Exception:
     shap = None
 
 # ---------------------------
-# Page config
+# Config
 # ---------------------------
 st.set_page_config(page_title="Clinical CHD Dashboard (Premium)", page_icon="❤️", layout="wide")
-# ---------------------------
-# Load model & scaler
-# ---------------------------
 MODEL_FILENAME = "best_heart_chd_model.joblib"
 SCALER_FILENAME = "scaler_chd.joblib"
+
+# ---------------------------
+# Load model + scaler (safe)
+# ---------------------------
 try:
     model = joblib.load(MODEL_FILENAME)
     scaler = joblib.load(SCALER_FILENAME)
 except Exception as e:
-    st.error(f"Failed to load model/scaler. Make sure files are present: {MODEL_FILENAME}, {SCALER_FILENAME}. Error: {e}")
+    st.error(f"Model or scaler not found or failed to load. Make sure files exist in repo root:\n- {MODEL_FILENAME}\n- {SCALER_FILENAME}\n\nError: {e}")
     st.stop()
 
 # ---------------------------
-# CSS — Apple-ish premium look + animations + skeleton
+# Styles (Apple-ish premium)
 # ---------------------------
 st.markdown(
     """
@@ -54,8 +54,8 @@ st.markdown(
         --card: rgba(255,255,255,0.03);
       }
       body { background: linear-gradient(180deg,#071223 0%, var(--dark) 100%); color: #e6eef8; }
-      .header-title { font-size:34px; font-weight:800; margin-bottom:4px; }
-      .header-sub { color:var(--muted); margin-top: -6px; margin-bottom: 14px; }
+      .header-title { font-size:34px; font-weight:800; margin-bottom:4px; text-align:center; }
+      .header-sub { color:var(--muted); margin-top:-8px; margin-bottom: 18px; text-align:center; }
       .card { background:var(--card); padding:18px; border-radius:14px; border:1px solid rgba(255,255,255,0.03); box-shadow:0 8px 30px rgba(2,6,23,0.6); animation:fadeUp .4s ease both; }
       @keyframes fadeUp { from {opacity:0; transform:translateY(6px)} to {opacity:1; transform:none} }
       .skeleton { height:14px; border-radius:8px; background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.06), rgba(255,255,255,0.03)); background-size:200% 100%; animation:shimmer 1.2s infinite; margin-bottom:8px; }
@@ -65,17 +65,14 @@ st.markdown(
       .risk-badge { padding:8px 12px; border-radius:12px; color:white; font-weight:700; display:inline-block; }
       .btn { background: linear-gradient(90deg,var(--accent2),var(--accent)); color:white; padding:8px 14px; border-radius:10px; font-weight:700; border:none; }
       .small { font-size:13px; color:var(--muted); }
-      /* responsive tweaks */
-      @media (max-width:768px){
-        .header-title { font-size:22px; }
-      }
+      @media (max-width:768px){ .header-title { font-size:22px; } }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # ---------------------------
-# Utility functions
+# Utilities
 # ---------------------------
 def to_bin(x):
     return 1 if str(x).lower() in ("yes", "male", "1", "true") else 0
@@ -186,25 +183,21 @@ PRESETS = {
 # ---------------------------
 st.markdown("<div class='header-title'>Clinical Heart Disease Risk Dashboard</div>", unsafe_allow_html=True)
 st.markdown("<div class='header-sub'>Premium clinical UI • Exportable PDF reports • Explainability (SHAP)</div>", unsafe_allow_html=True)
-st.divider()
+st.markdown("---")
 
 # ---------------------------
-# Sidebar controls
+# Sidebar
 # ---------------------------
 with st.sidebar:
     st.markdown("## ❤️ CHD Predictor")
     st.markdown("Premium clinical-style dashboard")
-    theme_choice = st.selectbox("Theme", ["Auto (follow OS)", "Dark", "Light"])
-    show_hero = st.checkbox("Show hero header", value=True)
     st.markdown("---")
-    st.markdown("### Presets (one-click)")
     preset_choice = st.selectbox("Load preset", ["Custom"] + list(PRESETS.keys()))
     if st.button("Clear preset"):
         preset_choice = "Custom"
     st.markdown("---")
     st.markdown("### Developer")
     st.markdown("Built by Sachin — academic demo (not clinical).")
-    st.markdown("---")
 
 # ---------------------------
 # Tabs
@@ -220,7 +213,6 @@ with tab1:
 
     preset_vals = PRESETS.get(preset_choice) if preset_choice in PRESETS else None
 
-    # Build form and ensure consistent numeric types (floats for float fields)
     with st.form("predict_form"):
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -247,13 +239,11 @@ with tab1:
     st.markdown("</div>", unsafe_allow_html=True)
 
     if submit:
-        # skeleton while computing
         placeholder = st.empty()
         with placeholder.container():
             st.markdown("<div class='card'><div class='skeleton' style='width:28%'></div><div class='skeleton' style='width:100%; height:220px'></div></div>", unsafe_allow_html=True)
             time.sleep(0.25)
 
-        # prepare dict and array
         input_vals = {
             "male": male, "age": int(age), "education": int(education), "currentSmoker": currentSmoker,
             "cigsPerDay": int(cigsPerDay), "BPMeds": BPMeds, "prevalentStroke": prevalentStroke,
@@ -275,15 +265,12 @@ with tab1:
             st.error("Prediction failed: " + str(e))
             st.stop()
 
-        # Save session
         st.session_state["last_input"] = input_vals
         st.session_state["last_pred"] = int(pred)
         st.session_state["last_prob"] = float(prob)
 
-        # Replace skeleton with results
         placeholder.empty()
 
-        # Header result row
         colA, colB, colC = st.columns([1.4, 2, 1])
         with colA:
             level = "LOW" if prob < 0.30 else ("MEDIUM" if prob < 0.60 else "HIGH")
@@ -315,25 +302,24 @@ with tab1:
         df_preview = pd.DataFrame([input_vals]).T.rename(columns={0:"value"})
         st.dataframe(df_preview, height=260)
 
-        # delight animations
         if prob < 0.25:
             st.balloons()
         elif prob > 0.9:
             st.snow()
 
 # ---------------------------
-# Explain (SHAP)
+# Explain (SHAP) tab
 # ---------------------------
 with tab2:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("### SHAP Explainability — Feature contributions (per-case)")
-    st.markdown("Run SHAP to see which features pushed the model toward or away from CHD risk. (Note: SHAP can be slow on some models.)", unsafe_allow_html=True)
+    st.markdown("### SHAP Explainability — per-case feature contributions", unsafe_allow_html=True)
+    st.markdown("Run SHAP to see which features pushed this prediction higher or lower. (SHAP can be slow for non-tree models.)", unsafe_allow_html=True)
 
     if "last_input" not in st.session_state:
-        st.info("First run a case in Predict tab to compute SHAP for that case.")
+        st.info("Run a prediction on the Predict tab first to compute SHAP for that case.")
     else:
         if shap is None:
-            st.warning("SHAP is not installed in this environment. Add `shap` to requirements.txt to enable explainability.")
+            st.warning("SHAP is not installed. Add `shap` to requirements.txt to enable explainability.")
         else:
             if st.button("Compute SHAP for last case (may take time)"):
                 placeholder_shap = st.empty()
@@ -343,26 +329,22 @@ with tab2:
                 last_input = st.session_state["last_input"]
                 try:
                     X_case = build_input_array(last_input)
-                    # background: small repeats of last input (replace with training sample if available)
                     background = np.repeat(X_case, 50, axis=0)
                     with st.spinner("Computing SHAP values..."):
-                        # Try TreeExplainer first
                         try:
                             explainer = shap.TreeExplainer(model)
+                            # shap_values shape depends on model type; we handle generically below
                             shap_values = explainer.shap_values(X_case) if hasattr(explainer, "shap_values") else explainer(X_case)
-                            # For sklearn classifiers, shap_values may be list; handle
                         except Exception:
-                            # fallback to generic Explainer
                             explainer = shap.Explainer(model.predict_proba, background)
                             shap_values = explainer(X_case)
                     placeholder_shap.empty()
-                    # Try plotting waterfall for single sample (if supported)
+                    # Try waterfall or fallback bar
                     try:
                         st.set_option('deprecation.showPyplotGlobalUse', False)
-                        fig = shap.plots.waterfall(shap_values[0] if isinstance(shap_values, (list, tuple)) else shap_values[0], show=False)
-                        st.pyplot(bbox_inches='tight')
+                        shap.plots.waterfall(shap_values[0] if isinstance(shap_values, (list,tuple)) else shap_values[0], show=True)
+                        st.pyplot()
                     except Exception:
-                        # fallback bar chart of absolute mean shap values
                         vals = shap_values.values if hasattr(shap_values, "values") else (shap_values[0] if isinstance(shap_values, (list,tuple)) else shap_values)
                         abs_mean = np.abs(vals).mean(0)
                         feat_names = list(last_input.keys())
@@ -380,17 +362,19 @@ with tab2:
 # ---------------------------
 with tab3:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("### Submission checklist & exports")
-    st.markdown("- Download PDF report from Predict tab (includes gauge image when possible).")
-    st.markdown("- Save EDA / model metric screenshots + SHAP plots for your paper.")
-    st.markdown("- Add the live app link and README to your submission.")
+    st.markdown("### Submission checklist & exports", unsafe_allow_html=True)
+    st.markdown("- Download the PDF report (Predict tab).")
+    st.markdown("- Save EDA/model metrics and SHAP plots for your paper.")
+    st.markdown("- Include live demo and README in your submission.")
     st.markdown("</div>", unsafe_allow_html=True)
 
 with tab4:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("### About & Disclaimer")
-    st.markdown("This demo uses the Framingham dataset and a trained classifier. It is an academic demo and not medical advice.")
+    st.markdown("### About & Disclaimer", unsafe_allow_html=True)
+    st.markdown("This is an academic demo using the Framingham dataset and a trained classifier. It is NOT medical advice.")
     st.markdown("</div>", unsafe_allow_html=True)
 
+# ---------------------------
 # Footer
-st.markdown("<div style='text-align:center; color:rgba(200,220,240,0.6); padding:14px 0;'>Built by Sachin • For academic/demo use only</div>", unsafe_allow_html=True)
+# ---------------------------
+st.markdown("<div style='text-align:center; color:rgba(200,220,240,0.6); padding:14px 0;'>Built by Sachin • Academic demo only</div>", unsafe_allow_html=True)
