@@ -1,6 +1,6 @@
 # app.py — CHD Predictor v2.2 (Dynamic Edition)
 # Built by Sachin Ravi
-# Full dynamic UI, SHAP primary + permutation fallback (uses test-split), background toggle, PDF export.
+# Full dynamic UI, SHAP primary + permutation fallback, background toggle, PDF export, accuracy-safe.
 
 import os
 import io
@@ -44,10 +44,9 @@ st.set_page_config(
 )
 
 # ---------------------------
-# Styling & dynamic background
+# CSS + background
 # ---------------------------
 def inject_css(bg_enabled: bool, bg_url: str):
-    # dynamic gradient + glassmorphism + micro animations + optional background image
     bg_img_css = f"background-image: url('{bg_url}'); background-size: cover; background-position: center; filter: blur(6px) saturate(0.7);" if bg_enabled else ""
     css = f"""
     <style>
@@ -60,7 +59,6 @@ def inject_css(bg_enabled: bool, bg_url: str):
       height:100%;
     }}
 
-    /* background layer */
     .chd-bg {{
       position: fixed;
       inset: 0;
@@ -115,13 +113,11 @@ def inject_css(bg_enabled: bool, bg_url: str):
       border-radius:10px;
     }}
 
-    /* animated counter */
     .counter {{
       font-weight:800; font-size:28px;
       color: #fff;
     }}
 
-    /* responsive small tweaks */
     @media (max-width: 800px) {{
       .hero-title {{ font-size:20px; }}
     }}
@@ -131,18 +127,15 @@ def inject_css(bg_enabled: bool, bg_url: str):
     """
     st.markdown(css, unsafe_allow_html=True)
 
-# default blurred heartbeat image (public domain / optimized small)
+# background asset (optimized Unsplash; change if you prefer)
 HEART_BG = "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?q=80&w=1400&auto=format&fit=crop&ixlib=rb-4.0.3&s=8d8d3b7f2f9b1f8f0b8e2a1461f8a0f9"
-# you may replace above URL with your own optimized blurred image
 
-# sidebar toggle default off
+# persist background toggle
 if "bg_enabled" not in st.session_state:
     st.session_state["bg_enabled"] = True
 
-# We'll inject CSS after reading toggle
-
 # ---------------------------
-# Model file paths & training utilities
+# Model files & training helpers
 # ---------------------------
 MODEL_PATH = "best_heart_chd_model.joblib"
 SCALER_PATH = "scaler_chd.joblib"
@@ -194,7 +187,7 @@ def load_model_and_scaler():
         try:
             clf = joblib.load(MODEL_PATH)
             scaler = joblib.load(SCALER_PATH)
-            # attempt to prepare test split for permutation importance
+            # prepare test split from dataset for permutation importance
             df = download_dataset_or_synthesize()
             target_col = 'TenYearCHD' if 'TenYearCHD' in df.columns else ('target' if 'target' in df.columns else df.columns[-1])
             X = df.drop(columns=[target_col])
@@ -208,7 +201,7 @@ def load_model_and_scaler():
 model, scaler, FEATURE_NAMES, TEST_SPLIT = load_model_and_scaler()
 
 # ---------------------------
-# Preprocess & prediction helpers
+# Preprocess, predict, risk label
 # ---------------------------
 def preprocess_df_for_model(df_in: pd.DataFrame):
     df = df_in.copy().astype(float)
@@ -236,6 +229,9 @@ def risk_label(prob):
         return "High"
     return "Very High"
 
+# ---------------------------
+# Compute accuracy safe (best-effort)
+# ---------------------------
 def compute_model_accuracy():
     try:
         if TEST_SPLIT is not None:
@@ -260,6 +256,7 @@ def compute_model_accuracy():
         return None
 
 MODEL_ACCURACY = compute_model_accuracy()
+ACC_STR = f"{MODEL_ACCURACY:.2%}" if MODEL_ACCURACY is not None else "N/A"
 
 # ---------------------------
 # Plot helpers
@@ -287,16 +284,14 @@ def create_dual_gauge(prob):
 def plot_feature_chips(contribs):
     chips_html = "<div style='display:flex; gap:6px; flex-wrap:wrap;'>"
     for f, v in contribs.items():
-        color = "#ff6b6b" if v>0 else "#37c77f"
         sign = "+" if v>0 else ""
         chips_html += f"<div class='chip' style='border:1px solid rgba(255,255,255,0.02)'><strong>{f}</strong>: {sign}{v:.2f}</div>"
     chips_html += "</div>"
     return chips_html
 
 # ---------------------------
-# Header & sidebar (with bg toggle)
+# Header & Sidebar
 # ---------------------------
-# Sidebar controls
 with st.sidebar:
     st.markdown('<div class="glass">', unsafe_allow_html=True)
     st.markdown("## Settings")
@@ -304,7 +299,15 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Presets")
     preset = st.selectbox("Load preset", options=["Custom","Healthy (demo)","High-risk smoker","Elderly hypertensive"])
-    st.button("Reset form", key="reset_form")
+    if st.button("Reset form"):
+        for k in list(st.session_state.keys()):
+            # keep bg setting
+            if k not in ("bg_enabled",):
+                try:
+                    del st.session_state[k]
+                except Exception:
+                    pass
+        st.experimental_rerun()
     st.markdown("---")
     st.markdown("### About")
     st.markdown("<div class='muted'>Built by Sachin Ravi — demo ML model. Not for clinical use.</div>", unsafe_allow_html=True)
@@ -313,7 +316,7 @@ with st.sidebar:
 # inject CSS with bg toggle
 inject_css(st.session_state["bg_enabled"], HEART_BG)
 
-# Header (clean)
+# header (safe ACC_STR used)
 st.markdown(f"""
 <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;">
   <div style="display:flex; gap:12px; align-items:center;">
@@ -324,13 +327,13 @@ st.markdown(f"""
     </div>
   </div>
   <div style="display:flex; gap:14px; align-items:center;">
-    <div class="muted">Model accuracy: <strong>{MODEL_ACCURACY:.2%}</strong></div>
+    <div class="muted">Model accuracy: <strong>{ACC_STR}</strong></div>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ---------------------------
-# Input form (3-column) with animations hint
+# Input form
 # ---------------------------
 left_col, mid_col, right_col = st.columns([1.1,1.1,1.0], gap="large")
 
@@ -424,20 +427,19 @@ def build_input_dict():
     return data
 
 # ---------------------------
-# Predict action
+# Prediction action
 # ---------------------------
 if predict_btn:
     inputs = build_input_dict()
     X_df = pd.DataFrame([inputs])
 
-    # align if FEATURE_NAMES present
     try:
         if FEATURE_NAMES and len(FEATURE_NAMES) == X_df.shape[1]:
             X_df = X_df[FEATURE_NAMES]
     except Exception:
         pass
 
-    # small animated loader (Lottie)
+    # small loader
     with st.container():
         st.markdown('<div class="glass" style="padding:12px;">', unsafe_allow_html=True)
         st.markdown("<div style='display:flex; gap:12px; align-items:center;'>", unsafe_allow_html=True)
@@ -454,20 +456,18 @@ if predict_btn:
         st.error(f"Prediction failed: {e}")
         st.stop()
 
-    # save session entry
     hist_item = {"timestamp": datetime.now().isoformat(timespec='seconds'), "inputs": inputs, "prob": prob, "label": label}
     if save_session:
         st.session_state['history'].insert(0, hist_item)
         st.session_state['history'] = st.session_state['history'][:20]
 
-    # Top cards
+    # top cards
     col1, col2, col3 = st.columns([1,2,1], gap="large")
     with col1:
         st.markdown('<div class="glass">', unsafe_allow_html=True)
         st.markdown(f"<div style='font-size:13px; color:#9aa3ab'>Risk</div><div class='counter' id='counter'>{prob*100:.1f}%</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='muted'>Level: <strong>{label}</strong></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
-
     with col2:
         st.markdown('<div class="glass">', unsafe_allow_html=True)
         st.markdown("<div style='font-size:13px; color:#9aa3ab'>Recommendation</div>", unsafe_allow_html=True)
@@ -481,7 +481,6 @@ if predict_btn:
             st.markdown("<div style='font-weight:700; margin-top:6px;'>Low risk — maintain screening</div>", unsafe_allow_html=True)
             st.write("Lifestyle, routine checks.")
         st.markdown("</div>", unsafe_allow_html=True)
-
     with col3:
         st.markdown('<div class="glass">', unsafe_allow_html=True)
         st.markdown("<div style='font-size:13px; color:#9aa3ab'>Model Accuracy</div>", unsafe_allow_html=True)
@@ -489,8 +488,7 @@ if predict_btn:
             st.markdown(f"<div style='font-weight:800; font-size:20px;'>{MODEL_ACCURACY:.2%}</div>", unsafe_allow_html=True)
             st.markdown("<div class='muted'>Calculated on test split / dataset</div>", unsafe_allow_html=True)
         else:
-            st.markdown("<div class='muted'>Accuracy unavailable</div>", unsafe_allow_html=True)
-        # PDF export
+            st.markdown("<div class='muted'>Accuracy: N/A</div>", unsafe_allow_html=True)
         if st.button("📥 Download PDF Report"):
             try:
                 pdf_bytes = build_pdf(bytes_flag=True, inputs=inputs, prob=prob, label=label)
@@ -503,13 +501,11 @@ if predict_btn:
 
     st.markdown("<div class='soft-divider'></div>", unsafe_allow_html=True)
 
-    # Visuals: gauge + explainability
+    # visuals
     left_viz, right_viz = st.columns([2,1], gap="large")
     with left_viz:
         fig_g = create_dual_gauge(prob)
         st.plotly_chart(fig_g, use_container_width=True, config={"displayModeBar": False}, theme="streamlit")
-        # animated JS counter (smooth)
-        # included below in JS snippet
 
     with right_viz:
         st.markdown('<div class="glass">', unsafe_allow_html=True)
@@ -520,7 +516,6 @@ if predict_btn:
 
         use_permutation = False
 
-        # SHAP primary
         if SHAP_AVAILABLE:
             try:
                 explainer = shap.TreeExplainer(model)
@@ -541,11 +536,9 @@ if predict_btn:
             st.warning("SHAP not available — using permutation importance fallback")
             use_permutation = True
 
-        # Permutation importance fallback using TEST_SPLIT (reliable)
         if use_permutation:
             try:
                 from sklearn.inspection import permutation_importance
-                # Use test set or full dataset batch for stable results
                 if TEST_SPLIT is not None:
                     X_test, y_test = TEST_SPLIT
                     X_batch = scaler.transform(X_test)
@@ -560,12 +553,9 @@ if predict_btn:
 
                 result = permutation_importance(model, X_batch, y_batch, n_repeats=12, random_state=42)
                 pi_vals = result.importances_mean
-
-                # map feature names (if feature_names length doesn't match, use dataframe columns)
                 if len(feat_names) == len(pi_vals):
                     df_pi = pd.DataFrame({"feature": feat_names, "importance": pi_vals}).sort_values("importance", ascending=False)
                 else:
-                    # fallback names from X_batch columns
                     fallback_names = [f"f_{i}" for i in range(len(pi_vals))]
                     df_pi = pd.DataFrame({"feature": fallback_names, "importance": pi_vals}).sort_values("importance", ascending=False)
 
@@ -576,7 +566,7 @@ if predict_btn:
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Comparison mode
+    # comparison block
     if compare_mode:
         st.markdown("<div style='margin-top:12px;' class='glass'>", unsafe_allow_html=True)
         st.markdown("### Before → After slider (simulate interventions)")
@@ -601,7 +591,7 @@ if predict_btn:
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------
-# Session history preview
+# Session history preview and expander
 # ---------------------------
 st.markdown("<div style='margin-top:14px;' class='glass'>", unsafe_allow_html=True)
 st.markdown("### Model input preview")
@@ -676,10 +666,9 @@ def build_pdf(bytes_flag=True, inputs=None, prob=0.0, label=""):
     return out
 
 # ---------------------------
-# Lottie loader + keyboard + animated counter JS
+# Lottie + JS: loader, keyboard shortcuts, animated counter
 # ---------------------------
 LOTTIE_HEART = "https://assets8.lottiefiles.com/packages/lf20_j1adxtyb.json"
-# JS: lottie player, keyboard shortcuts (R -> Predict, P -> Download PDF), animated counter
 js = f"""
 <script src="https://unpkg.com/@lottiefiles/lottie-player@latest/dist/lottie-player.js"></script>
 <lottie-player id="lp" src="{LOTTIE_HEART}"  background="transparent"  speed="1"  style="width:64px; height:64px;"  loop  autoplay></lottie-player>
@@ -696,7 +685,7 @@ document.addEventListener('keydown', function(e) {{
   }}
 }});
 
-// Animated counter (smooth transition)
+// animated counter
 function animateCounter(id, start, end, duration) {{
   let obj = document.getElementById(id);
   if(!obj) return;
@@ -713,7 +702,6 @@ function animateCounter(id, start, end, duration) {{
   window.requestAnimationFrame(step);
 }}
 
-// Find counter element and animate if present
 const counter = document.getElementById('counter');
 if (counter && counter.innerText) {{
   const val = parseFloat(counter.innerText);
