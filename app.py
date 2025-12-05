@@ -1,6 +1,12 @@
-# app.py — CHD Predictor v2.2 (Dynamic Edition)
+# app.py — CHD Predictor v2.3 (Silicon-Valley Premium Edition)
 # Built by Sachin Ravi
-# Full dynamic UI, SHAP primary + permutation fallback, background toggle, PDF export, accuracy-safe.
+# - Premium SV UI/UX
+# - SHAP primary + permutation fallback (aligned)
+# - Feature alignment fix
+# - Safe rerun (st.rerun)
+# - ACC_STR safeguard
+# - PDF export, session history, presets
+# Note: This is a single-file app; add model & scaler joblib files to skip training.
 
 import os
 import io
@@ -28,7 +34,7 @@ try:
 except Exception:
     SHAP_AVAILABLE = False
 
-# ML imports
+# ML
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
@@ -37,105 +43,76 @@ from sklearn.metrics import accuracy_score
 # ---------------------------
 # Page config
 # ---------------------------
-st.set_page_config(
-    page_title="CHD Predictor — Built by Sachin Ravi",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="CHD Predictor — Built by Sachin Ravi",
+                   layout="wide", initial_sidebar_state="expanded")
 
 # ---------------------------
-# CSS + background
+# Stylish CSS (Silicon Valley look)
 # ---------------------------
 def inject_css(bg_enabled: bool, bg_url: str):
-    bg_img_css = f"background-image: url('{bg_url}'); background-size: cover; background-position: center; filter: blur(6px) saturate(0.7);" if bg_enabled else ""
+    bg_img_css = f"background-image: url('{bg_url}'); background-size: cover; background-position: center; filter: blur(8px) saturate(0.8);" if bg_enabled else ""
     css = f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800;900&display=swap');
 
     html, body, [class*="css"] {{
       font-family: Inter, system-ui, -apple-system, "SF Pro Text", "Helvetica Neue", Arial;
-      color: #e6eef3;
-      margin:0;
-      height:100%;
+      color: #e9f0f6;
+      background: #06070a;
     }}
 
-    .chd-bg {{
-      position: fixed;
-      inset: 0;
-      z-index: -2;
-      {bg_img_css}
-      opacity: 0.45;
-      transform: scale(1.03);
-    }}
+    /* background image + soft gradient animation */
+    .sv-bg {{ position: fixed; inset: 0; z-index:-3; {bg_img_css} opacity:0.42; transform:scale(1.02); }}
+    .sv-ambient {{ position: fixed; inset: 0; z-index:-4; background:
+      radial-gradient(600px 280px at 10% 10%, rgba(56,180,255,0.04), transparent 8%),
+      radial-gradient(500px 220px at 90% 80%, rgba(110,75,255,0.03), transparent 6%); pointer-events:none; animation: drift 20s linear infinite; mix-blend-mode:screen; }}
+    @keyframes drift {{ 0%{{transform:translate(0,0)}} 50%{{transform:translate(8px,-6px)}} 100%{{transform:translate(0,0)}} }}
 
-    .ambient-gradient {{
-      position: fixed;
-      inset: 0;
-      z-index: -3;
-      background: radial-gradient(800px 400px at 10% 10%, rgba(0,230,197,0.06), transparent 8%),
-                  radial-gradient(600px 300px at 90% 80%, rgba(95,75,255,0.03), transparent 6%);
-      pointer-events: none;
-      animation: slow-move 18s linear infinite;
-      mix-blend-mode: screen;
-    }}
-    @keyframes slow-move {{
-      0% {{ transform: translate(0,0) scale(1); }}
-      50% {{ transform: translate(6px,-4px) scale(1.01); }}
-      100% {{ transform: translate(0,0) scale(1); }}
-    }}
+    /* main container / header */
+    .sv-hero {{ display:flex; align-items:center; justify-content:space-between; gap:16px; padding:18px 8px; margin-bottom:14px; }}
+    .sv-brand {{ display:flex; gap:12px; align-items:center; }}
+    .sv-logo {{ width:56px; height:56px; border-radius:12px; background: linear-gradient(135deg,#00E1C5,#6EE7B7); display:flex; align-items:center; justify-content:center; font-weight:800; color:#031012; font-size:22px; box-shadow:0 8px 30px rgba(5,10,20,0.6); }}
+    .sv-title {{ font-size:22px; font-weight:800; letter-spacing:0.2px; }}
+    .sv-sub {{ color:#9aa3ab; font-size:13px; margin-top:4px; }}
 
-    .glass {{
+    /* neumorphic / card */
+    .card {{
       background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.03);
-      padding: 14px;
-      box-shadow: 0 12px 30px rgba(2,6,23,0.55);
-      transition: transform 0.18s ease, box-shadow 0.18s ease;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,0.03);
+      padding:14px;
+      box-shadow: 0 14px 40px rgba(2,6,23,0.5);
+      transition: transform .18s cubic-bezier(.2,.9,.2,1), box-shadow .18s ease;
     }}
-    .glass:hover {{
-      transform: translateY(-6px);
-      box-shadow: 0 20px 40px rgba(2,6,23,0.6);
-    }}
+    .card:hover {{ transform: translateY(-6px); box-shadow: 0 26px 60px rgba(2,6,23,0.6); }}
 
-    .hero-title {{ font-size:24px; font-weight:700; letter-spacing:0.2px; }}
-    .hero-sub {{ color: #9aa3ab; margin-top:6px; font-size:13px; }}
+    /* micro interactions */
+    button[role="button"] {{ transition: transform .12s ease; border-radius:10px !important; }}
+    button[role="button"]:hover {{ transform: translateY(-3px); }}
 
-    .stButton>button {{ border-radius:10px !important; padding:8px 14px !important; transition: transform 0.12s ease; }}
-    .stButton>button:hover {{ transform: translateY(-3px); }}
-
-    .chip {{ display:inline-block; padding:6px 10px; border-radius:999px; background: rgba(255,255,255,0.03); color:#d9fef0; font-size:13px; margin-right:6px; border:1px solid rgba(255,255,255,0.02); }}
     .muted {{ color:#9aa3ab; font-size:13px; }}
-
     .soft-divider {{ height:1px; background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); margin:12px 0; border-radius:2px; }}
 
-    .gauge-glow {{
-      box-shadow: 0 8px 40px rgba(255,107,107,0.12);
-      border-radius:10px;
-    }}
+    .chip {{ display:inline-block; padding:6px 10px; border-radius:999px; background: rgba(255,255,255,0.03); color:#e9fff8; font-size:13px; margin-right:6px; border:1px solid rgba(255,255,255,0.02); }}
 
-    .counter {{
-      font-weight:800; font-size:28px;
-      color: #fff;
-    }}
+    .counter {{ font-weight:800; font-size:28px; color:#fff; }}
 
+    /* responsive */
     @media (max-width: 800px) {{
-      .hero-title {{ font-size:20px; }}
+      .sv-title {{ font-size:18px; }}
+      .sv-logo {{ width:44px; height:44px; font-size:18px; }}
     }}
     </style>
-    <div class="chd-bg"></div>
-    <div class="ambient-gradient"></div>
+    <div class="sv-bg"></div>
+    <div class="sv-ambient"></div>
     """
     st.markdown(css, unsafe_allow_html=True)
 
-# background asset (optimized Unsplash; change if you prefer)
+# Background (optimized unsplash blurred image). Replace if you have a custom asset.
 HEART_BG = "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?q=80&w=1400&auto=format&fit=crop&ixlib=rb-4.0.3&s=8d8d3b7f2f9b1f8f0b8e2a1461f8a0f9"
 
-# persist background toggle
-if "bg_enabled" not in st.session_state:
-    st.session_state["bg_enabled"] = True
-
 # ---------------------------
-# Model files & training helpers
+# Model paths & dataset utils
 # ---------------------------
 MODEL_PATH = "best_heart_chd_model.joblib"
 SCALER_PATH = "scaler_chd.joblib"
@@ -147,7 +124,7 @@ def download_dataset_or_synthesize():
         df = pd.read_csv(url)
     except Exception:
         np.random.seed(RANDOM_STATE)
-        n = 1000
+        n = 1200
         df = pd.DataFrame({
             "age": np.random.randint(30,85,size=n),
             "male": np.random.randint(0,2,size=n),
@@ -176,7 +153,7 @@ def train_and_save_default_model():
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.18, random_state=RANDOM_STATE, stratify=y)
     scaler = StandardScaler()
     X_train_s = scaler.fit_transform(X_train)
-    clf = RandomForestClassifier(n_estimators=250, random_state=RANDOM_STATE)
+    clf = RandomForestClassifier(n_estimators=300, random_state=RANDOM_STATE)
     clf.fit(X_train_s, y_train)
     joblib.dump(clf, MODEL_PATH)
     joblib.dump(scaler, SCALER_PATH)
@@ -187,7 +164,7 @@ def load_model_and_scaler():
         try:
             clf = joblib.load(MODEL_PATH)
             scaler = joblib.load(SCALER_PATH)
-            # prepare test split from dataset for permutation importance
+            # Build TEST_SPLIT for permutation importance
             df = download_dataset_or_synthesize()
             target_col = 'TenYearCHD' if 'TenYearCHD' in df.columns else ('target' if 'target' in df.columns else df.columns[-1])
             X = df.drop(columns=[target_col])
@@ -201,15 +178,35 @@ def load_model_and_scaler():
 model, scaler, FEATURE_NAMES, TEST_SPLIT = load_model_and_scaler()
 
 # ---------------------------
+# Feature alignment (PERMANENT FIX)
+# ---------------------------
+def align_features(df: pd.DataFrame, feature_names: list):
+    """
+    Ensure df has exactly the feature_names in same order used during training.
+    Add missing columns (filled with 0.0), drop extras, and reorder.
+    """
+    df = df.copy()
+    # Add any missing columns
+    for c in feature_names:
+        if c not in df.columns:
+            df[c] = 0.0
+    # Drop non-expected columns
+    # Then reorder
+    df = df[feature_names]
+    # ensure numeric dtype
+    df = df.astype(float)
+    return df
+
+# ---------------------------
 # Preprocess, predict, risk label
 # ---------------------------
 def preprocess_df_for_model(df_in: pd.DataFrame):
-    df = df_in.copy().astype(float)
+    # Accepts raw df; align externally
     try:
-        Xs = scaler.transform(df)
+        Xs = scaler.transform(df_in)
     except Exception:
         tmp = StandardScaler()
-        Xs = tmp.fit_transform(df)
+        Xs = tmp.fit_transform(df_in)
     return Xs
 
 def predict_prob_single(df_in: pd.DataFrame):
@@ -230,7 +227,7 @@ def risk_label(prob):
     return "Very High"
 
 # ---------------------------
-# Compute accuracy safe (best-effort)
+# Model accuracy (safe)
 # ---------------------------
 def compute_model_accuracy():
     try:
@@ -238,11 +235,13 @@ def compute_model_accuracy():
             X_test, y_test = TEST_SPLIT
         else:
             df = download_dataset_or_synthesize()
-            target_col = 'TenYearCHD' if 'TenYearCHD' in df.columns else ('target' if 'target' in df.columns else df.columns[-1])
+            target_col = 'TenYearCHD' if 'TenYearCHD' in df.columns else df.columns[-1]
             X = df.drop(columns=[target_col])
             y = df[target_col].astype(int)
             _, X_test, _, y_test = train_test_split(X, y, test_size=0.18, random_state=RANDOM_STATE, stratify=y)
-        Xs = scaler.transform(X_test)
+        # align test features with training features
+        X_test_aligned = align_features(X_test, FEATURE_NAMES)
+        Xs = scaler.transform(X_test_aligned)
         try:
             ypred = model.predict(Xs)
         except Exception:
@@ -259,7 +258,7 @@ MODEL_ACCURACY = compute_model_accuracy()
 ACC_STR = f"{MODEL_ACCURACY:.2%}" if MODEL_ACCURACY is not None else "N/A"
 
 # ---------------------------
-# Plot helpers
+# Plot helpers (gauge & chips)
 # ---------------------------
 def create_dual_gauge(prob):
     fig = go.Figure(go.Indicator(
@@ -290,24 +289,28 @@ def plot_feature_chips(contribs):
     return chips_html
 
 # ---------------------------
-# Header & Sidebar
+# Sidebar (settings / presets)
 # ---------------------------
+if "bg_enabled" not in st.session_state:
+    st.session_state["bg_enabled"] = True
+
 with st.sidebar:
-    st.markdown('<div class="glass">', unsafe_allow_html=True)
+    st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("## Settings")
     st.session_state["bg_enabled"] = st.checkbox("Enable background image", value=st.session_state.get("bg_enabled", True))
     st.markdown("---")
     st.markdown("### Presets")
     preset = st.selectbox("Load preset", options=["Custom","Healthy (demo)","High-risk smoker","Elderly hypertensive"])
     if st.button("Reset form"):
+        # clear prediction-related states (but preserve background toggle and history)
+        keys_to_keep = {"bg_enabled", "history"}
         for k in list(st.session_state.keys()):
-            # keep bg setting
-            if k not in ("bg_enabled",):
+            if k not in keys_to_keep:
                 try:
                     del st.session_state[k]
                 except Exception:
                     pass
-        st.experimental_rerun()
+        st.rerun()
     st.markdown("---")
     st.markdown("### About")
     st.markdown("<div class='muted'>Built by Sachin Ravi — demo ML model. Not for clinical use.</div>", unsafe_allow_html=True)
@@ -316,47 +319,37 @@ with st.sidebar:
 # inject CSS with bg toggle
 inject_css(st.session_state["bg_enabled"], HEART_BG)
 
-# header (safe ACC_STR used)
+# ---------------------------
+# Header (SV product style)
+# ---------------------------
 st.markdown(f"""
-<div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;">
-  <div style="display:flex; gap:12px; align-items:center;">
-    <div style="width:48px; height:48px; border-radius:10px; background:linear-gradient(135deg,#00E1C5,#6EE7B7); display:flex; align-items:center; justify-content:center; font-weight:700; color:#02121b;">❤️</div>
+<div class="sv-hero">
+  <div class="sv-brand">
+    <div class="sv-logo">❤️</div>
     <div>
-      <div class="hero-title">CHD Predictor</div>
-      <div class="hero-sub">Built by Sachin Ravi</div>
+      <div class="sv-title">Clinical Heart Risk</div>
+      <div class="sv-sub">Built by Sachin Ravi — Product demo</div>
     </div>
   </div>
-  <div style="display:flex; gap:14px; align-items:center;">
+  <div style="display:flex; align-items:center; gap:18px;">
     <div class="muted">Model accuracy: <strong>{ACC_STR}</strong></div>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ---------------------------
-# Input form
+# Input form (3-column premium layout)
 # ---------------------------
 left_col, mid_col, right_col = st.columns([1.1,1.1,1.0], gap="large")
 
 defaults = {
-    "age": 58,
-    "male": 1,
-    "education": 1,
-    "currentSmoker": 1,
-    "cigsPerDay": 20,
-    "BPMeds": 1,
-    "prevalentStroke": 0,
-    "prevalentHyp": 1,
-    "diabetes": 1,
-    "totChol": 250,
-    "sysBP": 160,
-    "diaBP": 95,
-    "BMI": 29.5,
-    "heartRate": 90,
-    "glucose": 140
+    "age": 58, "male": 1, "education": 1, "currentSmoker": 1, "cigsPerDay": 20,
+    "BPMeds": 1, "prevalentStroke": 0, "prevalentHyp": 1, "diabetes": 1,
+    "totChol": 250, "sysBP": 160, "diaBP": 95, "BMI": 29.5, "heartRate": 90, "glucose": 140
 }
 
-with st.form("input_form"):
-    st.markdown('<div class="glass">', unsafe_allow_html=True)
+with st.form("input_form", clear_on_submit=False):
+    st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("### Patient details — enter or load a preset")
 
     with left_col:
@@ -382,23 +375,24 @@ with st.form("input_form"):
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    col_a, col_b, col_c = st.columns([1,1,1])
-    with col_a:
+    c1, c2, c3 = st.columns([1,1,1])
+    with c1:
         predict_btn = st.form_submit_button("🔍 Predict Risk")
-    with col_b:
+    with c2:
         compare_mode = st.checkbox("Enable Before / After comparison", value=False)
-    with col_c:
+    with c3:
         save_session = st.checkbox("Save to session history", value=True)
 
-# presets
-if preset != "Custom" and not predict_btn:
+# Apply presets safely (outside form rerun)
+if preset != "Custom" and not st.session_state.get("preset_applied", False):
     if preset == "Healthy (demo)":
         st.session_state.update({"age":40,"currentSmoker":("No",0),"cigsPerDay":0,"totChol":170,"sysBP":120,"diaBP":76,"BMI":22,"glucose":90,"heartRate":72})
     elif preset == "High-risk smoker":
         st.session_state.update({"age":62,"currentSmoker":("Yes",1),"cigsPerDay":25,"totChol":270,"sysBP":155,"diaBP":96,"BMI":31,"glucose":145,"heartRate":92})
     elif preset == "Elderly hypertensive":
         st.session_state.update({"age":73,"currentSmoker":("No",0),"cigsPerDay":0,"totChol":260,"sysBP":170,"diaBP":98,"BMI":28,"glucose":130,"heartRate":86})
-    st.experimental_rerun()
+    st.session_state["preset_applied"] = True
+    st.rerun()
 
 # session history
 if 'history' not in st.session_state:
@@ -427,27 +421,22 @@ def build_input_dict():
     return data
 
 # ---------------------------
-# Prediction action
+# Prediction logic (safe)
 # ---------------------------
 if predict_btn:
     inputs = build_input_dict()
-    X_df = pd.DataFrame([inputs])
-
+    # align features to training
     try:
-        if FEATURE_NAMES and len(FEATURE_NAMES) == X_df.shape[1]:
-            X_df = X_df[FEATURE_NAMES]
+        X_df = align_features(pd.DataFrame([inputs]), FEATURE_NAMES)
     except Exception:
-        pass
+        X_df = pd.DataFrame([inputs])  # fallback
 
-    # small loader
+    # lightweight loader
     with st.container():
-        st.markdown('<div class="glass" style="padding:12px;">', unsafe_allow_html=True)
-        st.markdown("<div style='display:flex; gap:12px; align-items:center;'>", unsafe_allow_html=True)
-        st.markdown("<div id='lottie-wrap'></div>", unsafe_allow_html=True)
-        st.markdown("<div><strong>Predicting risk...</strong><div class='muted'>Running model & explainability</div></div>", unsafe_allow_html=True)
+        st.markdown('<div class="card" style="padding:10px;">', unsafe_allow_html=True)
+        st.markdown("<div style='display:flex; gap:12px; align-items:center;'><div style='width:56px; height:56px;'><svg viewBox='0 0 100 100' width='48' height='48'><circle cx='50' cy='50' r='20' stroke='rgba(255,255,255,0.06)' stroke-width='4' fill='none'></circle></svg></div><div><strong>Predicting risk...</strong><div class='muted'>Running model & explainability</div></div></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-    time.sleep(0.7)
+    time.sleep(0.6)
 
     try:
         prob = predict_prob_single(X_df)
@@ -456,20 +445,21 @@ if predict_btn:
         st.error(f"Prediction failed: {e}")
         st.stop()
 
+    # save session
     hist_item = {"timestamp": datetime.now().isoformat(timespec='seconds'), "inputs": inputs, "prob": prob, "label": label}
     if save_session:
         st.session_state['history'].insert(0, hist_item)
-        st.session_state['history'] = st.session_state['history'][:20]
+        st.session_state['history'] = st.session_state['history'][:30]
 
-    # top cards
+    # Top insights cards (neumorphic)
     col1, col2, col3 = st.columns([1,2,1], gap="large")
     with col1:
-        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown(f"<div style='font-size:13px; color:#9aa3ab'>Risk</div><div class='counter' id='counter'>{prob*100:.1f}%</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='muted'>Level: <strong>{label}</strong></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
     with col2:
-        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown("<div style='font-size:13px; color:#9aa3ab'>Recommendation</div>", unsafe_allow_html=True)
         if prob > 0.7:
             st.markdown("<div style='font-weight:700; margin-top:6px;'>Urgent clinical review recommended</div>", unsafe_allow_html=True)
@@ -482,13 +472,14 @@ if predict_btn:
             st.write("Lifestyle, routine checks.")
         st.markdown("</div>", unsafe_allow_html=True)
     with col3:
-        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown("<div style='font-size:13px; color:#9aa3ab'>Model Accuracy</div>", unsafe_allow_html=True)
         if MODEL_ACCURACY is not None:
             st.markdown(f"<div style='font-weight:800; font-size:20px;'>{MODEL_ACCURACY:.2%}</div>", unsafe_allow_html=True)
             st.markdown("<div class='muted'>Calculated on test split / dataset</div>", unsafe_allow_html=True)
         else:
             st.markdown("<div class='muted'>Accuracy: N/A</div>", unsafe_allow_html=True)
+        # PDF export
         if st.button("📥 Download PDF Report"):
             try:
                 pdf_bytes = build_pdf(bytes_flag=True, inputs=inputs, prob=prob, label=label)
@@ -501,21 +492,23 @@ if predict_btn:
 
     st.markdown("<div class='soft-divider'></div>", unsafe_allow_html=True)
 
-    # visuals
+    # Visual area: gauge + explainability
     left_viz, right_viz = st.columns([2,1], gap="large")
     with left_viz:
         fig_g = create_dual_gauge(prob)
         st.plotly_chart(fig_g, use_container_width=True, config={"displayModeBar": False}, theme="streamlit")
+        st.markdown(f"<div style='text-align:center; font-size:16px; margin-top:-8px; color:#9aa3ab'>{prob*100:.1f}% — {label} risk</div>", unsafe_allow_html=True)
 
     with right_viz:
-        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown('<div class="card">', unsafe_allow_html=True)
         st.markdown("<div style='font-size:14px; font-weight:700;'>Explainability</div>", unsafe_allow_html=True)
 
-        feat_names = list(pd.DataFrame([inputs]).columns)
-        X_scaled = preprocess_df_for_model(pd.DataFrame([inputs]))
+        feat_names = FEATURE_NAMES[:] if FEATURE_NAMES else list(pd.DataFrame([inputs]).columns)
+        X_scaled = preprocess_df_for_model(align_features(pd.DataFrame([inputs]), FEATURE_NAMES))
 
         use_permutation = False
 
+        # SHAP preferred path
         if SHAP_AVAILABLE:
             try:
                 explainer = shap.TreeExplainer(model)
@@ -529,27 +522,29 @@ if predict_btn:
                 st.markdown(plot_feature_chips(top6), unsafe_allow_html=True)
                 df_bar = pd.DataFrame({"feature": list(top6.keys()), "impact": [top6[k] for k in top6]})
                 st.plotly_chart(px.bar(df_bar, x="impact", y="feature", orientation="h", height=260), use_container_width=True)
-            except Exception:
+            except Exception as e:
                 st.warning("SHAP failed — switching to permutation importance")
                 use_permutation = True
         else:
             st.warning("SHAP not available — using permutation importance fallback")
             use_permutation = True
 
+        # Permutation importance (reliable) using aligned test batch
         if use_permutation:
             try:
                 from sklearn.inspection import permutation_importance
                 if TEST_SPLIT is not None:
                     X_test, y_test = TEST_SPLIT
-                    X_batch = scaler.transform(X_test)
+                    X_test_aligned = align_features(X_test, FEATURE_NAMES)
+                    X_batch = scaler.transform(X_test_aligned)
                     y_batch = y_test.values
                 else:
                     df_tmp = download_dataset_or_synthesize()
                     target_col = 'TenYearCHD' if 'TenYearCHD' in df_tmp.columns else df_tmp.columns[-1]
                     X_tmp = df_tmp.drop(columns=[target_col])
-                    y_tmp = df_tmp[target_col].astype(int)
-                    X_batch = scaler.transform(X_tmp)
-                    y_batch = y_tmp.values
+                    X_tmp_aligned = align_features(X_tmp, FEATURE_NAMES)
+                    X_batch = scaler.transform(X_tmp_aligned)
+                    y_batch = df_tmp[target_col].astype(int).values
 
                 result = permutation_importance(model, X_batch, y_batch, n_repeats=12, random_state=42)
                 pi_vals = result.importances_mean
@@ -566,10 +561,10 @@ if predict_btn:
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # comparison block
+    # Comparison (simulate improvements)
     if compare_mode:
-        st.markdown("<div style='margin-top:12px;' class='glass'>", unsafe_allow_html=True)
-        st.markdown("### Before → After slider (simulate interventions)")
+        st.markdown("<div style='margin-top:12px;' class='card'>", unsafe_allow_html=True)
+        st.markdown("### Before → After (simulate interventions)")
         sim_col1, sim_col2 = st.columns([1,2])
         with sim_col1:
             reduce_bp = st.slider("Reduce systolic BP by (mmHg)", 0, 60, 10)
@@ -582,7 +577,7 @@ if predict_btn:
             if stop_smoking:
                 after_inputs["currentSmoker"] = 0
                 after_inputs["cigsPerDay"] = 0
-            prob_after = predict_prob_single(pd.DataFrame([after_inputs]))
+            prob_after = predict_prob_single(align_features(pd.DataFrame([after_inputs]), FEATURE_NAMES))
             cols_v = st.columns(2)
             cols_v[0].metric("Before risk", f"{prob*100:.1f}%")
             cols_v[1].metric("After risk", f"{prob_after*100:.1f}%")
@@ -591,9 +586,9 @@ if predict_btn:
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------
-# Session history preview and expander
+# Session preview & history
 # ---------------------------
-st.markdown("<div style='margin-top:14px;' class='glass'>", unsafe_allow_html=True)
+st.markdown("<div style='margin-top:14px;' class='card'>", unsafe_allow_html=True)
 st.markdown("### Model input preview")
 if st.session_state['history']:
     last = st.session_state['history'][0]
@@ -603,7 +598,7 @@ else:
     st.markdown("<div class='muted'>No saved sessions — make a prediction and check 'Save to session history'.</div>", unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
-with st.expander("Session history (last 20)"):
+with st.expander("Session history (last 30)"):
     for idx, h in enumerate(st.session_state['history']):
         cols = st.columns([2,1,1])
         cols[0].markdown(f"**{h['timestamp']}** — {h['label']} — {h['prob']:.2f}")
@@ -613,7 +608,7 @@ with st.expander("Session history (last 20)"):
                     st.session_state[k] = v
                 except Exception:
                     pass
-            st.experimental_rerun()
+            st.rerun()
         if cols[2].button("Export PDF", key=f"pdf_{idx}"):
             pdf_bytes = build_pdf(bytes_flag=True, inputs=h['inputs'], prob=h['prob'], label=h['label'])
             b64 = base64.b64encode(pdf_bytes).decode()
@@ -671,7 +666,7 @@ def build_pdf(bytes_flag=True, inputs=None, prob=0.0, label=""):
 LOTTIE_HEART = "https://assets8.lottiefiles.com/packages/lf20_j1adxtyb.json"
 js = f"""
 <script src="https://unpkg.com/@lottiefiles/lottie-player@latest/dist/lottie-player.js"></script>
-<lottie-player id="lp" src="{LOTTIE_HEART}"  background="transparent"  speed="1"  style="width:64px; height:64px;"  loop  autoplay></lottie-player>
+<lottie-player id="lp" src="{LOTTIE_HEART}"  background="transparent"  speed="1"  style="width:56px; height:56px;"  loop  autoplay></lottie-player>
 
 <script>
 document.addEventListener('keydown', function(e) {{
