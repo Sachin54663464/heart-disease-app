@@ -6,4 +6,5 @@ joblib>=1.0
 plotly>=5.6.0
 matplotlib>=3.4
 fpdf>=1.7.2
+shap>=0.41.0
 kaleido>=0.2.1
