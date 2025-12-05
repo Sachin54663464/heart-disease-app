@@ -1,238 +1,163 @@
-# app.py — PREMIUM MEDICAL-STYLE HEART DISEASE DASHBOARD
-# Drop-in replacement for your current app.py
-# Expects these files in repo root:
+# app.py — Premium Apple-style Clinical Dashboard with SHAP Explainability
+# Expects in repo:
 #   - best_heart_chd_model.joblib
 #   - scaler_chd.joblib
 #
-# Requirements (examples, add to requirements.txt):
+# Requirements (add to requirements.txt):
 # streamlit, numpy, pandas, scikit-learn, joblib, plotly, matplotlib, fpdf, shap, kaleido
-# NOTE: SHAP may be slow on non-tree models. We include graceful fallbacks.
 
 import streamlit as st
 import joblib
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import time
 from fpdf import FPDF
 import io
-import time
 import matplotlib.pyplot as plt
 
-# optional shap import — keep app working if shap missing
+# Optional heavy import - shap. If not available, app will still run but SHAP tab will show message.
 try:
     import shap
 except Exception:
     shap = None
 
 # ---------------------------
-# PAGE & THEME CONFIG
+# Page config
 # ---------------------------
-st.set_page_config(page_title="Heart Disease Predictor — Clinical UI", page_icon="❤️", layout="wide")
+st.set_page_config(page_title="Clinical CHD Dashboard (Premium)", page_icon="❤️", layout="wide")
+# ---------------------------
+# Load model & scaler
+# ---------------------------
+MODEL_FILENAME = "best_heart_chd_model.joblib"
+SCALER_FILENAME = "scaler_chd.joblib"
+try:
+    model = joblib.load(MODEL_FILENAME)
+    scaler = joblib.load(SCALER_FILENAME)
+except Exception as e:
+    st.error(f"Failed to load model/scaler. Make sure files are present: {MODEL_FILENAME}, {SCALER_FILENAME}. Error: {e}")
+    st.stop()
 
-# Color tokens
-ACCENT = "#ff4b4b"    # red
-ACCENT2 = "#ff6b6b"
-SAFE = "#16a34a"
-CAUTION = "#f59e0b"
-DARK_BG = "#0b1220"
-LIGHT_BG = "#f6f8fb"
-TEXT_DARK = "#0b1220"
-TEXT_LIGHT = "#e6eef8"
-
 # ---------------------------
-# STYLES: dark/light + animations + medical style
+# CSS — Apple-ish premium look + animations + skeleton
 # ---------------------------
-# We use CSS variables and respects prefers-color-scheme for an "auto" theme.
 st.markdown(
-    f"""
+    """
     <style>
-    :root {{
-      --accent: {ACCENT};
-      --accent2: {ACCENT2};
-      --safe: {SAFE};
-      --caution: {CAUTION};
-      --dark-bg: {DARK_BG};
-      --light-bg: {LIGHT_BG};
-      --text-dark: {TEXT_DARK};
-      --text-light: {TEXT_LIGHT};
-    }}
-    /* Auto respects OS preference; you can toggle app theme with UI toggle */
-    @media (prefers-color-scheme: dark) {{
-        body {{ background: linear-gradient(180deg,#071223 0%, var(--dark-bg) 100%); color: var(--text-light); }}
-    }}
-    @media (prefers-color-scheme: light) {{
-        body {{ background: linear-gradient(180deg,#ffffff 0%, var(--light-bg) 100%); color: var(--text-dark); }}
-    }}
-    /* Basic page-level card + animation style */
-    .card {{
-      background: rgba(255,255,255,0.02);
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 18px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.45);
-      border: 1px solid rgba(255,255,255,0.03);
-      animation: fadeUp 0.45s ease both;
-    }}
-    @keyframes fadeUp {{
-      from {{ opacity: 0; transform: translateY(8px); }}
-      to {{ opacity: 1; transform: translateY(0); }}
-    }}
-    .small-muted {{ color: rgba(200,220,240,0.6); font-size:13px; }}
-    .kv {{ font-weight:700; color: #dff2ff; }}
-    .btn-primary {{ background: linear-gradient(90deg, var(--accent2), var(--accent)); padding:10px 14px; border-radius:10px; color:white; font-weight:700; }}
-    .risk-badge {{ padding:10px 12px; border-radius:10px; color:white; font-weight:700; display:inline-block; }}
-    .tooltip {{ color: rgba(200,220,240,0.55); font-size:13px; }}
-    /* skeleton loader */
-    .skeleton {{
-      background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.06), rgba(255,255,255,0.03));
-      height: 18px;
-      border-radius: 6px;
-      animation: shimmer 1.2s infinite;
-    }}
-    @keyframes shimmer {{
-      0% {{ background-position: -200px 0; }}
-      100% {{ background-position: 200px 0; }}
-    }}
-    /* page transition */
-    .page-fade {{ animation: pageFade 0.5s ease both; }}
-    @keyframes pageFade {{
-      from {{ opacity: 0; transform: translateY(6px); }}
-      to {{ opacity: 1; transform: translateY(0); }}
-    }}
-    /* responsive tweaks */
-    @media (max-width: 768px) {{
-      .card {{ padding:12px; }}
-    }}
+      :root{
+        --accent: #ff4b4b;
+        --accent2: #ff6b6b;
+        --safe: #16a34a;
+        --caution: #f59e0b;
+        --dark: #0b1220;
+        --muted: #9fb0c9;
+        --card: rgba(255,255,255,0.03);
+      }
+      body { background: linear-gradient(180deg,#071223 0%, var(--dark) 100%); color: #e6eef8; }
+      .header-title { font-size:34px; font-weight:800; margin-bottom:4px; }
+      .header-sub { color:var(--muted); margin-top: -6px; margin-bottom: 14px; }
+      .card { background:var(--card); padding:18px; border-radius:14px; border:1px solid rgba(255,255,255,0.03); box-shadow:0 8px 30px rgba(2,6,23,0.6); animation:fadeUp .4s ease both; }
+      @keyframes fadeUp { from {opacity:0; transform:translateY(6px)} to {opacity:1; transform:none} }
+      .skeleton { height:14px; border-radius:8px; background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.06), rgba(255,255,255,0.03)); background-size:200% 100%; animation:shimmer 1.2s infinite; margin-bottom:8px; }
+      @keyframes shimmer { 0% {background-position:200% 0} 100% {background-position:-200% 0} }
+      .muted { color:var(--muted); font-size:13px; }
+      .kv { font-weight:700; color:#dff2ff; }
+      .risk-badge { padding:8px 12px; border-radius:12px; color:white; font-weight:700; display:inline-block; }
+      .btn { background: linear-gradient(90deg,var(--accent2),var(--accent)); color:white; padding:8px 14px; border-radius:10px; font-weight:700; border:none; }
+      .small { font-size:13px; color:var(--muted); }
+      /* responsive tweaks */
+      @media (max-width:768px){
+        .header-title { font-size:22px; }
+      }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # ---------------------------
-# SAFE LOADING: model & scaler
+# Utility functions
 # ---------------------------
-MODEL_FILENAME = "best_heart_chd_model.joblib"
-SCALER_FILENAME = "scaler_chd.joblib"
-
-try:
-    model = joblib.load(MODEL_FILENAME)
-    scaler = joblib.load(SCALER_FILENAME)
-except Exception as e:
-    st.error("Model or scaler not found. Make sure your repo contains:\n"
-             f"- {MODEL_FILENAME}\n- {SCALER_FILENAME}\n\nError: " + str(e))
-    st.stop()
-
-# ---------------------------
-# UTILITIES: type coercion + safe getters
-# ---------------------------
+def to_bin(x):
+    return 1 if str(x).lower() in ("yes", "male", "1", "true") else 0
 
 def safe_cast(value, dtype, default):
-    """Try to cast `value` to dtype (int/float/str). If fails, returns default."""
     try:
         if dtype == int:
             return int(float(value))
         if dtype == float:
             return float(value)
-        if dtype == str:
-            return str(value)
+        return str(value)
     except Exception:
         return default
 
 def get_preset_value(presets, key, dtype, default):
-    """
-    Read from presets dict (which may contain strings or mixed types),
-    return a value of correct dtype (int/float/str) or default.
-    """
     if not presets:
         return default
     raw = presets.get(key, default)
     return safe_cast(raw, dtype, default)
 
-def to_bin(x):
-    return 1 if str(x).lower() in ("yes", "male", "1", "true") else 0
-
-def build_input_array(vals):
-    """
-    Build the 1x15 numpy array in the exact feature order used for training.
-    Ensure numeric values are floats.
-    """
+def build_input_array(d):
     arr = np.array([[
-        to_bin(vals["male"]),
-        float(vals["age"]),
-        float(vals["education"]),
-        to_bin(vals["currentSmoker"]),
-        float(vals["cigsPerDay"]),
-        to_bin(vals["BPMeds"]),
-        to_bin(vals.get("prevalentStroke", 0)),
-        to_bin(vals.get("prevalentHyp", 0)),
-        to_bin(vals["diabetes"]),
-        float(vals["totChol"]),
-        float(vals["sysBP"]),
-        float(vals["diaBP"]),
-        float(vals["BMI"]),
-        float(vals.get("heartRate", 72)),
-        float(vals["glucose"])
+        to_bin(d["male"]),
+        float(d["age"]),
+        float(d["education"]),
+        to_bin(d["currentSmoker"]),
+        float(d["cigsPerDay"]),
+        to_bin(d["BPMeds"]),
+        to_bin(d.get("prevalentStroke", 0)),
+        to_bin(d.get("prevalentHyp", 0)),
+        to_bin(d["diabetes"]),
+        float(d["totChol"]),
+        float(d["sysBP"]),
+        float(d["diaBP"]),
+        float(d["BMI"]),
+        float(d.get("heartRate", 72)),
+        float(d["glucose"])
     ]], dtype=float)
     return arr
 
-# ---------------------------
-# VISUAL HELPERS: visuals, PDF
-# ---------------------------
-def make_gauge_plot(prob):
+def make_gauge_figure(prob):
     val = float(prob) * 100
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
         value=val,
-        number={'suffix': '%', 'font': {'size': 36}},
-        title={'text': "Risk Percentage"},
-        gauge={
-            'axis': {'range': [0, 100]},
-            'bar': {'color': ACCENT},
-            'steps': [
-                {'range': [0, 30], 'color': SAFE},
-                {'range': [30, 60], 'color': CAUTION},
-                {'range': [60, 100], 'color': ACCENT}
-            ],
-            'threshold': {'line': {'color': "black", 'width': 2}, 'thickness': 0.75, 'value': val}
-        }
+        number={'suffix':'%','font':{'size':36}},
+        title={'text':"10-year CHD Risk"},
+        gauge={'axis':{'range':[0,100]},
+               'steps':[{'range':[0,30],'color':'#16a34a'},{'range':[30,60],'color':'#f59e0b'},{'range':[60,100],'color':'#ff4b4b'}],
+               'bar':{'color':'#ff4b4b'}}
     ))
     fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", height=420, margin=dict(t=20,b=10,l=10,r=10))
     return fig
 
 def make_prob_bar(prob):
-    fig = go.Figure(go.Bar(x=["CHD Risk"], y=[prob], marker_color=ACCENT))
-    fig.update_layout(yaxis=dict(range=[0,1], tickformat=".0%"), paper_bgcolor="rgba(0,0,0,0)", height=240, margin=dict(t=10,b=10))
+    fig = go.Figure(go.Bar(x=["CHD risk"], y=[prob], marker_color="#ff4b4b"))
+    fig.update_layout(yaxis=dict(range=[0,1], tickformat=".0%"), paper_bgcolor="rgba(0,0,0,0)", height=220, margin=dict(t=10,b=10))
     return fig
 
-def export_plotly_png_bytes(fig, width=900, height=480):
-    """
-    Try to export Plotly figure to PNG bytes via kaleido. If fails, return None.
-    """
+def export_fig_png(fig):
     try:
-        img = fig.to_image(format="png", width=width, height=height, scale=2)
+        img = fig.to_image(format="png", width=900, height=480, scale=2)
         return img
     except Exception:
         return None
 
-def pdf_report_bytes(input_df, label, prob, note="", gauge_png=None):
+def pdf_from_input(input_df, pred_label, prob, gauge_png=None):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", size=16)
-    pdf.cell(0, 8, "Heart Disease Risk Report", ln=True, align="C")
+    pdf.set_font("Arial", size=14)
+    pdf.cell(0, 8, "Clinical Heart Disease Risk Report", ln=True, align="C")
     pdf.ln(6)
     pdf.set_font("Arial", size=11)
-    pdf.cell(0, 6, f"Prediction: {label}", ln=True)
+    pdf.cell(0, 6, f"Prediction: {pred_label}", ln=True)
     pdf.cell(0, 6, f"Probability: {prob:.2f}", ln=True)
     pdf.ln(6)
-    if note:
-        pdf.multi_cell(0, 5, f"Note: {note}")
-        pdf.ln(4)
     if gauge_png:
         try:
-            tmp_path = "/tmp/gauge.png"
-            with open(tmp_path, "wb") as f:
+            tmp = "/tmp/gauge.png"
+            with open(tmp, "wb") as f:
                 f.write(gauge_png)
-            pdf.image(tmp_path, x=30, w=150)
+            pdf.image(tmp, x=25, w=160)
             pdf.ln(6)
         except Exception:
             pass
@@ -243,233 +168,206 @@ def pdf_report_bytes(input_df, label, prob, note="", gauge_png=None):
     return pdf.output(dest="S").encode("latin-1")
 
 # ---------------------------
-# SIDEBAR (controls & presets)
-# ---------------------------
-st.sidebar.markdown("<div style='text-align:center'><h3 style='color:#ff6b6b;margin:0;'>❤️ CHD Predictor</h3></div>", unsafe_allow_html=True)
-st.sidebar.markdown("<div class='small-muted'>Premium clinical-style dashboard</div>", unsafe_allow_html=True)
-st.sidebar.markdown("---")
-
-# Theme toggle: we implement light/dark toggle and also respect OS preference
-theme_choice = st.sidebar.selectbox("Theme", options=["Auto (follow OS)", "Dark", "Light"], index=0)
-show_hero = st.sidebar.checkbox("Show hero header", value=True)
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Presets (one-click)")
-if st.sidebar.button("Load: Healthy (demo)"):
-    st.session_state["_preset_flag"] = "healthy"
-if st.sidebar.button("Load: High-risk smoker (demo)"):
-    st.session_state["_preset_flag"] = "high_smoker"
-if st.sidebar.button("Clear preset"):
-    st.session_state["_preset_flag"] = None
-
-# ---------------------------
-# PRESET DICTIONARIES
+# Presets
 # ---------------------------
 PRESETS = {
-    "healthy": {
-        "male": "Female", "age": 45, "education": 2, "currentSmoker": "No", "cigsPerDay": 0,
-        "BPMeds": "No", "prevalentStroke": "No", "prevalentHyp": "No", "diabetes": "No",
-        "totChol": 180, "sysBP": 120, "diaBP": 78, "BMI": 23.0, "heartRate": 72, "glucose": 85
+    "Healthy (demo)": {
+        "male": "Female","age":38,"education":3,"currentSmoker":"No","cigsPerDay":0,"BPMeds":"No","prevalentStroke":"No","prevalentHyp":"No","diabetes":"No",
+        "totChol":180,"sysBP":115,"diaBP":75,"BMI":22.1,"heartRate":68,"glucose":85
     },
-    "high_smoker": {
-        "male": "Male", "age": 62, "education": 1, "currentSmoker": "Yes", "cigsPerDay": 20,
-        "BPMeds": "Yes", "prevalentStroke": "No", "prevalentHyp": "Yes", "diabetes": "Yes",
-        "totChol": 260, "sysBP": 150, "diaBP": 90, "BMI": 30.0, "heartRate": 78, "glucose": 140
+    "High-risk smoker (demo)": {
+        "male":"Male","age":58,"education":1,"currentSmoker":"Yes","cigsPerDay":20,"BPMeds":"Yes","prevalentStroke":"No","prevalentHyp":"Yes","diabetes":"Yes",
+        "totChol":250,"sysBP":160,"diaBP":95,"BMI":29.5,"heartRate":90,"glucose":140
     }
 }
 
 # ---------------------------
-# PAGE HERO
+# Header
 # ---------------------------
-if show_hero:
-    col_a, col_b = st.columns([1, 4])
-    with col_a:
-        st.markdown("<div style='padding:6px; display:inline-block; border-radius:10px; background: linear-gradient(90deg,#ff6b6b,#ff4b4b);'><strong style='color:white; padding:8px;'>CHD</strong></div>", unsafe_allow_html=True)
-    with col_b:
-        st.markdown("<h1 style='margin-bottom:6px;'>Clinical Heart Disease Risk Dashboard</h1>", unsafe_allow_html=True)
-        st.markdown("<div class='small-muted'>Add patient details, get a risk estimate, download a clinical report, and explore explainability.</div>", unsafe_allow_html=True)
+st.markdown("<div class='header-title'>Clinical Heart Disease Risk Dashboard</div>", unsafe_allow_html=True)
+st.markdown("<div class='header-sub'>Premium clinical UI • Exportable PDF reports • Explainability (SHAP)</div>", unsafe_allow_html=True)
+st.divider()
+
+# ---------------------------
+# Sidebar controls
+# ---------------------------
+with st.sidebar:
+    st.markdown("## ❤️ CHD Predictor")
+    st.markdown("Premium clinical-style dashboard")
+    theme_choice = st.selectbox("Theme", ["Auto (follow OS)", "Dark", "Light"])
+    show_hero = st.checkbox("Show hero header", value=True)
+    st.markdown("---")
+    st.markdown("### Presets (one-click)")
+    preset_choice = st.selectbox("Load preset", ["Custom"] + list(PRESETS.keys()))
+    if st.button("Clear preset"):
+        preset_choice = "Custom"
+    st.markdown("---")
+    st.markdown("### Developer")
+    st.markdown("Built by Sachin — academic demo (not clinical).")
     st.markdown("---")
 
 # ---------------------------
-# MAIN: Tabs (Predict / Explain / Report / About)
+# Tabs
 # ---------------------------
-tab1, tab2, tab3, tab4 = st.tabs(["Predict", "Explain", "Report", "About"])
+tab1, tab2, tab3, tab4 = st.tabs(["Predict", "Explain (SHAP)", "Report", "About"])
 
-# ---------- TAB: Predict ----------
+# ---------------------------
+# Predict tab
+# ---------------------------
 with tab1:
-    st.markdown("<div class='card page-fade'>", unsafe_allow_html=True)
-    st.markdown("### Patient details (group in logical sections)", unsafe_allow_html=True)
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### Patient details — enter or load a preset", unsafe_allow_html=True)
 
-    # Load preset flag if set
-    preset_flag = st.session_state.get("_preset_flag", None)
-    preset_vals = PRESETS.get(preset_flag) if preset_flag in PRESETS else None
-    # Clear preset flag after reading so subsequent edits aren't overwritten
-    st.session_state["_preset_flag"] = None
+    preset_vals = PRESETS.get(preset_choice) if preset_choice in PRESETS else None
 
-    # form with safe casting for number inputs
+    # Build form and ensure consistent numeric types (floats for float fields)
     with st.form("predict_form"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            age = st.number_input("Age", min_value=18, max_value=120,
-                                  value=get_preset_value(preset_vals, "age", int, 50))
-            gender = st.selectbox("Gender", ["Male", "Female"],
-                                  index=0 if get_preset_value(preset_vals, "male", str, "Male") == "Male" else 1)
-            education = st.number_input("Education (1–4)", 1, 4,
-                                        value=get_preset_value(preset_vals, "education", int, 1))
-            currentSmoker = st.selectbox("Current smoker?", ["Yes", "No"],
-                                         index=0 if get_preset_value(preset_vals, "currentSmoker", str, "No") == "Yes" else 1)
-            cigsPerDay = st.number_input("Cigarettes / day", 0, 100,
-                                         value=get_preset_value(preset_vals, "cigsPerDay", int, 0))
-        with col2:
-            BPMeds = st.selectbox("On BP medication?", ["Yes", "No"],
-                                  index=0 if get_preset_value(preset_vals, "BPMeds", str, "No") == "Yes" else 1)
-            prevalentStroke = st.selectbox("Stroke history?", ["Yes", "No"],
-                                           index=0 if get_preset_value(preset_vals, "prevalentStroke", str, "No") == "Yes" else 1)
-            prevalentHyp = st.selectbox("Hypertension?", ["Yes", "No"],
-                                        index=0 if get_preset_value(preset_vals, "prevalentHyp", str, "No") == "Yes" else 1)
-            diabetes = st.selectbox("Diabetes?", ["Yes", "No"],
-                                    index=0 if get_preset_value(preset_vals, "diabetes", str, "No") == "Yes" else 1)
-            BMI = st.number_input("BMI", min_value=10.0, max_value=60.0,
-                                  value=float(get_preset_value(preset_vals, "BMI", float, 25.0)))
-        with col3:
-            totChol = st.number_input("Total cholesterol", 100, 600,
-                                      value=float(get_preset_value(preset_vals, "totChol", float, 200.0)))
-            sysBP = st.number_input("Systolic BP", 80, 250,
-                                    value=float(get_preset_value(preset_vals, "sysBP", float, 120.0)))
-            diaBP = st.number_input("Diastolic BP", 40, 200,
-                                    value=float(get_preset_value(preset_vals, "diaBP", float, 80.0)))
-            heartRate = st.number_input("Heart rate", 30, 200,
-                                        value=float(get_preset_value(preset_vals, "heartRate", float, 72.0)))
-            glucose = st.number_input("Glucose", 40, 500,
-                                      value=float(get_preset_value(preset_vals, "glucose", float, 90.0)))
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            age = st.number_input("Age", 18, 120, value=get_preset_value(preset_vals, "age", int, 50))
+            male = st.selectbox("Gender", ["Female","Male"], index=0 if get_preset_value(preset_vals, "male", str, "Female") == "Female" else 1)
+            education = st.number_input("Education (1–4)", 1, 4, value=get_preset_value(preset_vals, "education", int, 1))
+            currentSmoker = st.selectbox("Current smoker?", ["No","Yes"], index=0 if get_preset_value(preset_vals, "currentSmoker", str, "No")=="No" else 1)
+            cigsPerDay = st.number_input("Cigarettes / day", 0, 200, value=get_preset_value(preset_vals, "cigsPerDay", int, 0))
+        with c2:
+            BPMeds = st.selectbox("On BP medication?", ["No","Yes"], index=0 if get_preset_value(preset_vals, "BPMeds", str, "No")=="No" else 1)
+            prevalentStroke = st.selectbox("Stroke history?", ["No","Yes"], index=0 if get_preset_value(preset_vals, "prevalentStroke", str, "No")=="No" else 1)
+            prevalentHyp = st.selectbox("Hypertension?", ["No","Yes"], index=0 if get_preset_value(preset_vals, "prevalentHyp", str, "No")=="No" else 1)
+            diabetes = st.selectbox("Diabetes?", ["No","Yes"], index=0 if get_preset_value(preset_vals, "diabetes", str, "No")=="No" else 1)
+            BMI = st.number_input("BMI", 10.0, 60.0, value=float(get_preset_value(preset_vals, "BMI", float, 25.0)))
+        with c3:
+            totChol = st.number_input("Total cholesterol", 100.0, 600.0, value=float(get_preset_value(preset_vals, "totChol", float, 200.0)))
+            sysBP = st.number_input("Systolic BP", 80.0, 250.0, value=float(get_preset_value(preset_vals, "sysBP", float, 120.0)))
+            diaBP = st.number_input("Diastolic BP", 40.0, 150.0, value=float(get_preset_value(preset_vals, "diaBP", float, 80.0)))
+            heartRate = st.number_input("Heart Rate", 30.0, 200.0, value=float(get_preset_value(preset_vals, "heartRate", float, 72.0)))
+            glucose = st.number_input("Glucose", 40.0, 400.0, value=float(get_preset_value(preset_vals, "glucose", float, 90.0)))
 
-        submitted = st.form_submit_button("🔍 Predict")
+        submit = st.form_submit_button("🔍 Predict Risk")
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # On submit: show skeleton loader while processing
-    if submitted:
-        # show a skeleton area for results while we compute (nice UX)
+    if submit:
+        # skeleton while computing
         placeholder = st.empty()
         with placeholder.container():
-            st.markdown("<div class='card'><div class='skeleton' style='width:40%; margin-bottom:10px'></div>"
-                        "<div class='skeleton' style='width:80%; height:220px'></div></div>", unsafe_allow_html=True)
+            st.markdown("<div class='card'><div class='skeleton' style='width:28%'></div><div class='skeleton' style='width:100%; height:220px'></div></div>", unsafe_allow_html=True)
+            time.sleep(0.25)
 
-        # prepare input dict with proper types
+        # prepare dict and array
         input_vals = {
-            "male": gender, "age": int(age), "education": int(education), "currentSmoker": currentSmoker,
+            "male": male, "age": int(age), "education": int(education), "currentSmoker": currentSmoker,
             "cigsPerDay": int(cigsPerDay), "BPMeds": BPMeds, "prevalentStroke": prevalentStroke,
             "prevalentHyp": prevalentHyp, "diabetes": diabetes, "totChol": float(totChol),
             "sysBP": float(sysBP), "diaBP": float(diaBP), "BMI": float(BMI),
             "heartRate": float(heartRate), "glucose": float(glucose)
         }
 
-        # small artificial wait for UX demonstration (remove/shorten in production)
-        time.sleep(0.3)
-
-        # build array, scale, predict — robust error handling
         try:
-            X_arr = build_input_array(input_vals)
+            X = build_input_array(input_vals)
             try:
-                X_scaled = scaler.transform(X_arr)
+                Xs = scaler.transform(X)
             except Exception:
-                X_scaled = X_arr  # fallback if scaler issue
-            pred = model.predict(X_scaled)[0]
-            prob = float(model.predict_proba(X_scaled)[0][1])
+                Xs = X
+            pred = model.predict(Xs)[0]
+            prob = float(model.predict_proba(Xs)[0][1])
         except Exception as e:
             placeholder.empty()
             st.error("Prediction failed: " + str(e))
             st.stop()
 
-        # show results (replace skeleton)
-        placeholder.empty()
-
-        # Save latest results in session for other tabs (explain/report)
+        # Save session
         st.session_state["last_input"] = input_vals
         st.session_state["last_pred"] = int(pred)
         st.session_state["last_prob"] = float(prob)
 
-        # Results header row: badge, recommendation, quick export
-        c1, c2, c3 = st.columns([1.5, 2, 1])
-        with c1:
+        # Replace skeleton with results
+        placeholder.empty()
+
+        # Header result row
+        colA, colB, colC = st.columns([1.4, 2, 1])
+        with colA:
             level = "LOW" if prob < 0.30 else ("MEDIUM" if prob < 0.60 else "HIGH")
-            color = SAFE if prob < 0.30 else (CAUTION if prob < 0.60 else ACCENT)
-            st.markdown(f"<div class='card'><div style='display:flex; justify-content:space-between; align-items:center'>"
-                        f"<div><span class='risk-badge' style='background:{color}'>{level}</span>"
-                        f"<div class='small-muted' style='margin-top:6px'>Probability: {prob:.2f}</div></div></div></div>", unsafe_allow_html=True)
-        with c2:
+            color = "#16a34a" if prob < 0.30 else ("#f59e0b" if prob < 0.60 else "#ff4b4b")
+            st.markdown(f"<div class='card'><div style='display:flex;align-items:center;justify-content:space-between'><div><span style='font-size:14px;color:{color};font-weight:800'>Risk: {level}</span><div class='muted'>Probability: {prob:.2f}</div></div></div></div>", unsafe_allow_html=True)
+        with colB:
             st.markdown("<div class='card'><div class='kv'>Recommendation</div>", unsafe_allow_html=True)
-            if int(pred) == 1:
-                st.markdown("<b>Consult a clinician urgently. Recommended tests: ECG, lipid panel, fasting glucose.</b>", unsafe_allow_html=True)
+            if int(pred)==1:
+                st.markdown("<b>Consult a clinician urgently. Consider ECG, lipid panel, fasting glucose.</b>", unsafe_allow_html=True)
             else:
-                st.markdown("Maintain healthy lifestyle; routine check-ups recommended.", unsafe_allow_html=True)
+                st.markdown("Maintain a healthy lifestyle & monitor vitals regularly.", unsafe_allow_html=True)
             st.markdown("</div>", unsafe_allow_html=True)
-        with c3:
+        with colC:
             st.markdown("<div class='card'><div class='kv'>Export</div>", unsafe_allow_html=True)
-            # Grab gauge PNG if available (requires kaleido)
-            gauge_fig = make_gauge_plot(prob)
-            gauge_png = export_plotly_png_bytes(gauge_fig)
-            pdf_bytes = pdf_report_bytes(pd.DataFrame([input_vals]), ("HIGH" if pred==1 else "LOW"), prob, note="Academic demo — not medical advice.", gauge_png=gauge_png)
+            gfig = make_gauge_figure(prob)
+            gpng = export_fig_png(gfig)
+            pdf_bytes = pdf_from_input(pd.DataFrame([input_vals]), ("HIGH" if pred==1 else "LOW"), prob, gauge_png=gpng)
             st.download_button("📥 Download PDF Report", data=pdf_bytes, file_name="chd_report.pdf", mime="application/pdf")
             st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("---")
-        # Visuals row
-        left_col, right_col = st.columns([1.5, 1])
-        with left_col:
-            st.plotly_chart(gauge_fig, use_container_width=True)
-        with right_col:
+        left, right = st.columns([1.5,1])
+        with left:
+            st.plotly_chart(gfig, use_container_width=True)
+        with right:
             st.plotly_chart(make_prob_bar(prob), use_container_width=True)
 
         st.markdown("### Model input preview")
-        preview_df = pd.DataFrame([input_vals]).T.rename(columns={0: "value"})
-        st.dataframe(preview_df, height=260)
+        df_preview = pd.DataFrame([input_vals]).T.rename(columns={0:"value"})
+        st.dataframe(df_preview, height=260)
 
-        # subtle celebratory animation on low-risk
+        # delight animations
         if prob < 0.25:
             st.balloons()
-        elif prob > 0.90:
+        elif prob > 0.9:
             st.snow()
 
-# ---------- TAB: Explain ----------
+# ---------------------------
+# Explain (SHAP)
+# ---------------------------
 with tab2:
-    st.markdown("<div class='card page-fade'>", unsafe_allow_html=True)
-    st.markdown("### Model Explainability (SHAP) — optional", unsafe_allow_html=True)
-    st.markdown("SHAP explains which features pushed the model toward this prediction. SHAP may be slow for some models.", unsafe_allow_html=True)
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### SHAP Explainability — Feature contributions (per-case)")
+    st.markdown("Run SHAP to see which features pushed the model toward or away from CHD risk. (Note: SHAP can be slow on some models.)", unsafe_allow_html=True)
 
     if "last_input" not in st.session_state:
-        st.info("Run a prediction on the Predict tab first to compute SHAP for that case.")
+        st.info("First run a case in Predict tab to compute SHAP for that case.")
     else:
         if shap is None:
-            st.warning("SHAP is not installed in this environment. Add `shap` to requirements.txt to enable explainability plots.")
+            st.warning("SHAP is not installed in this environment. Add `shap` to requirements.txt to enable explainability.")
         else:
-            # show a skeleton while computing
-            if st.button("Compute SHAP for last input (may take 10-60 seconds)"):
+            if st.button("Compute SHAP for last case (may take time)"):
                 placeholder_shap = st.empty()
                 with placeholder_shap.container():
-                    st.markdown("<div class='skeleton' style='width:30%; margin-bottom:10px'></div>", unsafe_allow_html=True)
-                    st.markdown("<div class='skeleton' style='width:100%; height:300px'></div>", unsafe_allow_html=True)
-
-                # prepare background & sample arrays
+                    st.markdown("<div class='skeleton' style='width:30%'></div><div class='skeleton' style='width:100%; height:300px'></div>", unsafe_allow_html=True)
+                    time.sleep(0.25)
                 last_input = st.session_state["last_input"]
                 try:
-                    # background: repeat last input (if you have train X, replace with a sampled X)
-                    bg = np.repeat(np.array(list(last_input.values()), dtype=float).reshape(1,-1), 50, axis=0)
-                    X_sample = np.array([list(last_input.values())], dtype=float)
+                    X_case = build_input_array(last_input)
+                    # background: small repeats of last input (replace with training sample if available)
+                    background = np.repeat(X_case, 50, axis=0)
                     with st.spinner("Computing SHAP values..."):
-                        explainer = shap.Explainer(model, bg)
-                        shap_values = explainer(X_sample)
+                        # Try TreeExplainer first
+                        try:
+                            explainer = shap.TreeExplainer(model)
+                            shap_values = explainer.shap_values(X_case) if hasattr(explainer, "shap_values") else explainer(X_case)
+                            # For sklearn classifiers, shap_values may be list; handle
+                        except Exception:
+                            # fallback to generic Explainer
+                            explainer = shap.Explainer(model.predict_proba, background)
+                            shap_values = explainer(X_case)
                     placeholder_shap.empty()
-                    # try waterfall
+                    # Try plotting waterfall for single sample (if supported)
                     try:
                         st.set_option('deprecation.showPyplotGlobalUse', False)
-                        fig_w = shap.plots.waterfall(shap_values[0], show=False)
+                        fig = shap.plots.waterfall(shap_values[0] if isinstance(shap_values, (list, tuple)) else shap_values[0], show=False)
                         st.pyplot(bbox_inches='tight')
                     except Exception:
-                        # fallback to mean |shap| bar
-                        vals = np.abs(shap_values.values).mean(0) if hasattr(shap_values, "values") else np.mean(np.abs(shap_values), axis=1)[0]
+                        # fallback bar chart of absolute mean shap values
+                        vals = shap_values.values if hasattr(shap_values, "values") else (shap_values[0] if isinstance(shap_values, (list,tuple)) else shap_values)
+                        abs_mean = np.abs(vals).mean(0)
                         feat_names = list(last_input.keys())
                         fig2, ax = plt.subplots(figsize=(6,4))
-                        ax.barh(feat_names, vals)
+                        ax.barh(feat_names, abs_mean)
                         ax.set_xlabel("Mean |SHAP value|")
                         st.pyplot(fig2)
                 except Exception as e:
@@ -477,28 +375,22 @@ with tab2:
                     st.error("SHAP computation failed: " + str(e))
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ---------- TAB: Report ----------
+# ---------------------------
+# Report & About tabs
+# ---------------------------
 with tab3:
-    st.markdown("<div class='card page-fade'>", unsafe_allow_html=True)
-    st.markdown("### Submission Checklist & Deliverables", unsafe_allow_html=True)
-    st.markdown("- Downloadable PDF report (from Predict tab).")
-    st.markdown("- Save screenshots: EDA, model metrics, SHAP, app UI.")
-    st.markdown("- Add live demo link and README to your paper submission.")
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### Submission checklist & exports")
+    st.markdown("- Download PDF report from Predict tab (includes gauge image when possible).")
+    st.markdown("- Save EDA / model metric screenshots + SHAP plots for your paper.")
+    st.markdown("- Add the live app link and README to your submission.")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ---------- TAB: About ----------
 with tab4:
-    st.markdown("<div class='card page-fade'>", unsafe_allow_html=True)
-    st.markdown("### About & Disclaimer", unsafe_allow_html=True)
-    st.markdown("""
-    - **Dataset:** Framingham Heart Study (public).  
-    - **Purpose:** Academic demonstration — **not** clinical diagnosis.  
-    - **Features:** End-to-end pipeline, PDF export, explainability (SHAP).  
-    - **Contact:** Add your details here for README/portfolio.
-    """, unsafe_allow_html=True)
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("### About & Disclaimer")
+    st.markdown("This demo uses the Framingham dataset and a trained classifier. It is an academic demo and not medical advice.")
     st.markdown("</div>", unsafe_allow_html=True)
 
-# ---------------------------
-# FOOTER
-# ---------------------------
-st.markdown("<div style='padding:10px 0; text-align:center; color:rgba(200,220,240,0.6)'>© 2025 Heart Disease Predictor • Built by Sachin</div>", unsafe_allow_html=True)
+# Footer
+st.markdown("<div style='text-align:center; color:rgba(200,220,240,0.6); padding:14px 0;'>Built by Sachin • For academic/demo use only</div>", unsafe_allow_html=True)
