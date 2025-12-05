@@ -1,12 +1,6 @@
-# app.py — CHD Predictor v2.3 (Silicon-Valley Premium Edition)
+# app.py — CHD Predictor v2.4 (Final Silicon-Valley Premium)
 # Built by Sachin Ravi
-# - Premium SV UI/UX
-# - SHAP primary + permutation fallback (aligned)
-# - Feature alignment fix
-# - Safe rerun (st.rerun)
-# - ACC_STR safeguard
-# - PDF export, session history, presets
-# Note: This is a single-file app; add model & scaler joblib files to skip training.
+# v2.4: emoji inputs, feature-alignment, SHAP+permutation fallback, safe rerun, stable predictions.
 
 import os
 import io
@@ -27,14 +21,14 @@ import plotly.graph_objects as go
 import plotly.express as px
 import matplotlib.pyplot as plt
 
-# Optional SHAP
+# Try SHAP
 try:
     import shap
     SHAP_AVAILABLE = True
 except Exception:
     SHAP_AVAILABLE = False
 
-# ML
+# ML imports
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
@@ -47,7 +41,7 @@ st.set_page_config(page_title="CHD Predictor — Built by Sachin Ravi",
                    layout="wide", initial_sidebar_state="expanded")
 
 # ---------------------------
-# Stylish CSS (Silicon Valley look)
+# Styling (SV premium)
 # ---------------------------
 def inject_css(bg_enabled: bool, bg_url: str):
     bg_img_css = f"background-image: url('{bg_url}'); background-size: cover; background-position: center; filter: blur(8px) saturate(0.8);" if bg_enabled else ""
@@ -57,62 +51,42 @@ def inject_css(bg_enabled: bool, bg_url: str):
 
     html, body, [class*="css"] {{
       font-family: Inter, system-ui, -apple-system, "SF Pro Text", "Helvetica Neue", Arial;
-      color: #e9f0f6;
-      background: #06070a;
+      color: #eaf3f9;
+      background: #05060a;
     }}
 
-    /* background image + soft gradient animation */
     .sv-bg {{ position: fixed; inset: 0; z-index:-3; {bg_img_css} opacity:0.42; transform:scale(1.02); }}
     .sv-ambient {{ position: fixed; inset: 0; z-index:-4; background:
       radial-gradient(600px 280px at 10% 10%, rgba(56,180,255,0.04), transparent 8%),
       radial-gradient(500px 220px at 90% 80%, rgba(110,75,255,0.03), transparent 6%); pointer-events:none; animation: drift 20s linear infinite; mix-blend-mode:screen; }}
     @keyframes drift {{ 0%{{transform:translate(0,0)}} 50%{{transform:translate(8px,-6px)}} 100%{{transform:translate(0,0)}} }}
 
-    /* main container / header */
-    .sv-hero {{ display:flex; align-items:center; justify-content:space-between; gap:16px; padding:18px 8px; margin-bottom:14px; }}
-    .sv-brand {{ display:flex; gap:12px; align-items:center; }}
+    .card {{ background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); border-radius:14px; border:1px solid rgba(255,255,255,0.03); padding:14px; box-shadow: 0 14px 40px rgba(2,6,23,0.5); transition: transform .18s ease, box-shadow .18s ease; }}
+    .card:hover {{ transform: translateY(-6px); box-shadow: 0 26px 60px rgba(2,6,23,0.6); }}
     .sv-logo {{ width:56px; height:56px; border-radius:12px; background: linear-gradient(135deg,#00E1C5,#6EE7B7); display:flex; align-items:center; justify-content:center; font-weight:800; color:#031012; font-size:22px; box-shadow:0 8px 30px rgba(5,10,20,0.6); }}
     .sv-title {{ font-size:22px; font-weight:800; letter-spacing:0.2px; }}
-    .sv-sub {{ color:#9aa3ab; font-size:13px; margin-top:4px; }}
-
-    /* neumorphic / card */
-    .card {{
-      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
-      border-radius:14px;
-      border:1px solid rgba(255,255,255,0.03);
-      padding:14px;
-      box-shadow: 0 14px 40px rgba(2,6,23,0.5);
-      transition: transform .18s cubic-bezier(.2,.9,.2,1), box-shadow .18s ease;
-    }}
-    .card:hover {{ transform: translateY(-6px); box-shadow: 0 26px 60px rgba(2,6,23,0.6); }}
-
-    /* micro interactions */
+    .muted {{ color:#9aa3ab; font-size:13px; }}
+    .chip {{ display:inline-block; padding:6px 10px; border-radius:999px; background: rgba(255,255,255,0.03); color:#e9fff8; font-size:13px; margin-right:6px; border:1px solid rgba(255,255,255,0.02); }}
+    .soft-divider {{ height:1px; background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); margin:12px 0; border-radius:2px; }}
+    .counter {{ font-weight:800; font-size:28px; color:#fff; }}
     button[role="button"] {{ transition: transform .12s ease; border-radius:10px !important; }}
     button[role="button"]:hover {{ transform: translateY(-3px); }}
-
-    .muted {{ color:#9aa3ab; font-size:13px; }}
-    .soft-divider {{ height:1px; background: linear-gradient(90deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01)); margin:12px 0; border-radius:2px; }}
-
-    .chip {{ display:inline-block; padding:6px 10px; border-radius:999px; background: rgba(255,255,255,0.03); color:#e9fff8; font-size:13px; margin-right:6px; border:1px solid rgba(255,255,255,0.02); }}
-
-    .counter {{ font-weight:800; font-size:28px; color:#fff; }}
-
-    /* responsive */
-    @media (max-width: 800px) {{
-      .sv-title {{ font-size:18px; }}
-      .sv-logo {{ width:44px; height:44px; font-size:18px; }}
-    }}
+    @media (max-width: 800px) {{ .sv-title {{ font-size:18px; }} .sv-logo {{ width:44px; height:44px; font-size:18px; }} }}
     </style>
     <div class="sv-bg"></div>
     <div class="sv-ambient"></div>
     """
     st.markdown(css, unsafe_allow_html=True)
 
-# Background (optimized unsplash blurred image). Replace if you have a custom asset.
+# Background (unsplash optimized blurred)
 HEART_BG = "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?q=80&w=1400&auto=format&fit=crop&ixlib=rb-4.0.3&s=8d8d3b7f2f9b1f8f0b8e2a1461f8a0f9"
 
+# Keep bg toggle in session
+if "bg_enabled" not in st.session_state:
+    st.session_state["bg_enabled"] = True
+
 # ---------------------------
-# Model paths & dataset utils
+# Model files and dataset utilities
 # ---------------------------
 MODEL_PATH = "best_heart_chd_model.joblib"
 SCALER_PATH = "scaler_chd.joblib"
@@ -147,7 +121,7 @@ def download_dataset_or_synthesize():
 
 def train_and_save_default_model():
     df = download_dataset_or_synthesize()
-    target_col = 'TenYearCHD' if 'TenYearCHD' in df.columns else ('target' if 'target' in df.columns else df.columns[-1])
+    target_col = 'TenYearCHD' if 'TenYearCHD' in df.columns else df.columns[-1]
     X = df.drop(columns=[target_col])
     y = df[target_col].astype(int)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.18, random_state=RANDOM_STATE, stratify=y)
@@ -164,9 +138,9 @@ def load_model_and_scaler():
         try:
             clf = joblib.load(MODEL_PATH)
             scaler = joblib.load(SCALER_PATH)
-            # Build TEST_SPLIT for permutation importance
+            # build test split for permutation importance
             df = download_dataset_or_synthesize()
-            target_col = 'TenYearCHD' if 'TenYearCHD' in df.columns else ('target' if 'target' in df.columns else df.columns[-1])
+            target_col = 'TenYearCHD' if 'TenYearCHD' in df.columns else df.columns[-1]
             X = df.drop(columns=[target_col])
             y = df[target_col].astype(int)
             _, X_test, _, y_test = train_test_split(X, y, test_size=0.18, random_state=RANDOM_STATE, stratify=y)
@@ -178,30 +152,22 @@ def load_model_and_scaler():
 model, scaler, FEATURE_NAMES, TEST_SPLIT = load_model_and_scaler()
 
 # ---------------------------
-# Feature alignment (PERMANENT FIX)
+# Feature alignment (permanent fix)
 # ---------------------------
 def align_features(df: pd.DataFrame, feature_names: list):
-    """
-    Ensure df has exactly the feature_names in same order used during training.
-    Add missing columns (filled with 0.0), drop extras, and reorder.
-    """
     df = df.copy()
-    # Add any missing columns
+    # Add missing
     for c in feature_names:
         if c not in df.columns:
             df[c] = 0.0
-    # Drop non-expected columns
-    # Then reorder
+    # Reorder and ensure numeric
     df = df[feature_names]
-    # ensure numeric dtype
-    df = df.astype(float)
-    return df
+    return df.astype(float)
 
 # ---------------------------
-# Preprocess, predict, risk label
+# Preprocess & predict helpers
 # ---------------------------
 def preprocess_df_for_model(df_in: pd.DataFrame):
-    # Accepts raw df; align externally
     try:
         Xs = scaler.transform(df_in)
     except Exception:
@@ -218,16 +184,13 @@ def predict_prob_single(df_in: pd.DataFrame):
     return float(proba[0])
 
 def risk_label(prob):
-    if prob < 0.15:
-        return "Low"
-    if prob < 0.35:
-        return "Moderate"
-    if prob < 0.7:
-        return "High"
+    if prob < 0.15: return "Low"
+    if prob < 0.35: return "Moderate"
+    if prob < 0.7: return "High"
     return "Very High"
 
 # ---------------------------
-# Model accuracy (safe)
+# Accuracy safe compute
 # ---------------------------
 def compute_model_accuracy():
     try:
@@ -239,7 +202,6 @@ def compute_model_accuracy():
             X = df.drop(columns=[target_col])
             y = df[target_col].astype(int)
             _, X_test, _, y_test = train_test_split(X, y, test_size=0.18, random_state=RANDOM_STATE, stratify=y)
-        # align test features with training features
         X_test_aligned = align_features(X_test, FEATURE_NAMES)
         Xs = scaler.transform(X_test_aligned)
         try:
@@ -249,8 +211,7 @@ def compute_model_accuracy():
                 ypred = (model.predict_proba(Xs)[:,1] >= 0.5).astype(int)
             else:
                 return None
-        acc = accuracy_score(y_test, ypred)
-        return float(acc)
+        return float(accuracy_score(y_test, ypred))
     except Exception:
         return None
 
@@ -258,7 +219,7 @@ MODEL_ACCURACY = compute_model_accuracy()
 ACC_STR = f"{MODEL_ACCURACY:.2%}" if MODEL_ACCURACY is not None else "N/A"
 
 # ---------------------------
-# Plot helpers (gauge & chips)
+# Plot helpers
 # ---------------------------
 def create_dual_gauge(prob):
     fig = go.Figure(go.Indicator(
@@ -289,7 +250,7 @@ def plot_feature_chips(contribs):
     return chips_html
 
 # ---------------------------
-# Sidebar (settings / presets)
+# Sidebar & Presets (safe)
 # ---------------------------
 if "bg_enabled" not in st.session_state:
     st.session_state["bg_enabled"] = True
@@ -302,7 +263,6 @@ with st.sidebar:
     st.markdown("### Presets")
     preset = st.selectbox("Load preset", options=["Custom","Healthy (demo)","High-risk smoker","Elderly hypertensive"])
     if st.button("Reset form"):
-        # clear prediction-related states (but preserve background toggle and history)
         keys_to_keep = {"bg_enabled", "history"}
         for k in list(st.session_state.keys()):
             if k not in keys_to_keep:
@@ -316,19 +276,16 @@ with st.sidebar:
     st.markdown("<div class='muted'>Built by Sachin Ravi — demo ML model. Not for clinical use.</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-# inject CSS with bg toggle
 inject_css(st.session_state["bg_enabled"], HEART_BG)
 
-# ---------------------------
-# Header (SV product style)
-# ---------------------------
+# Header
 st.markdown(f"""
-<div class="sv-hero">
-  <div class="sv-brand">
+<div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px;">
+  <div style="display:flex; gap:12px; align-items:center;">
     <div class="sv-logo">❤️</div>
     <div>
       <div class="sv-title">Clinical Heart Risk</div>
-      <div class="sv-sub">Built by Sachin Ravi — Product demo</div>
+      <div class="muted">Built by Sachin Ravi</div>
     </div>
   </div>
   <div style="display:flex; align-items:center; gap:18px;">
@@ -338,79 +295,93 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ---------------------------
-# Input form (3-column premium layout)
+# Input form (emoji labels chosen)
 # ---------------------------
 left_col, mid_col, right_col = st.columns([1.1,1.1,1.0], gap="large")
 
 defaults = {
-    "age": 58, "male": 1, "education": 1, "currentSmoker": 1, "cigsPerDay": 20,
-    "BPMeds": 1, "prevalentStroke": 0, "prevalentHyp": 1, "diabetes": 1,
+    "age": 58, "male": "👨", "education": 1, "currentSmoker": "🚬", "cigsPerDay": 20,
+    "BPMeds": "💊", "prevalentStroke": "🧠", "prevalentHyp": "⚡", "diabetes": "🩸",
     "totChol": 250, "sysBP": 160, "diaBP": 95, "BMI": 29.5, "heartRate": 90, "glucose": 140
 }
+
+# Apply preset once safely (outside the form)
+if preset != "Custom" and st.session_state.get("applied_preset") != preset:
+    if preset == "Healthy (demo)":
+        st.session_state.update({"age":40,"currentSmoker":"🚭","cigsPerDay":0,"totChol":170,"sysBP":120,"diaBP":76,"BMI":22,"glucose":90,"heartRate":72})
+    elif preset == "High-risk smoker":
+        st.session_state.update({"age":62,"currentSmoker":"🚬","cigsPerDay":25,"totChol":270,"sysBP":155,"diaBP":96,"BMI":31,"glucose":145,"heartRate":92})
+    elif preset == "Elderly hypertensive":
+        st.session_state.update({"age":73,"currentSmoker":"🚭","cigsPerDay":0,"totChol":260,"sysBP":170,"diaBP":98,"BMI":28,"glucose":130,"heartRate":86})
+    st.session_state["applied_preset"] = preset
+    st.rerun()
 
 with st.form("input_form", clear_on_submit=False):
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.markdown("### Patient details — enter or load a preset")
 
     with left_col:
-        age = st.number_input("Age", min_value=0, max_value=120, value=int(defaults["age"]), key="age")
-        gender = st.selectbox("Gender", options=[("Male",1),("Female",0)], format_func=lambda x:x[0], index=0)
-        education = st.selectbox("Education (1-4)", options=[1,2,3,4], index=int(defaults["education"])-1)
-        currentSmoker = st.selectbox("Current smoker?", options=[("Yes",1),("No",0)], format_func=lambda x:x[0], index=0 if int(defaults["currentSmoker"]) else 1)
-        cigsPerDay = st.number_input("Cigarettes / day", min_value=0, max_value=100, value=int(defaults["cigsPerDay"]))
+        age = st.number_input("Age", min_value=0, max_value=120, value=int(st.session_state.get("age", defaults["age"])), key="age")
+        gender = st.selectbox("Gender", options=["👨 Male","👩 Female"], index=0 if st.session_state.get("male","👨")== "👨" else 1)
+        education = st.selectbox("Education (1-4)", options=[1,2,3,4], index=int(st.session_state.get("education",1))-1)
+        currentSmoker = st.selectbox("Current smoker?", options=["🚬 Smoker","🚭 Non-smoker"], index=0 if st.session_state.get("currentSmoker","🚬")== "🚬" else 1)
+        cigsPerDay = st.number_input("Cigarettes / day", min_value=0, max_value=100, value=int(st.session_state.get("cigsPerDay", defaults["cigsPerDay"])))
 
     with mid_col:
-        BPMeds = st.selectbox("On BP medication?", options=[("Yes",1),("No",0)], format_func=lambda x:x[0], index=0 if int(defaults["BPMeds"]) else 1)
-        prevalentStroke = st.selectbox("Stroke history?", options=[("Yes",1),("No",0)], format_func=lambda x:x[0], index=1 if int(defaults["prevalentStroke"])==0 else 0)
-        prevalentHyp = st.selectbox("Hypertension?", options=[("Yes",1),("No",0)], format_func=lambda x:x[0], index=0 if int(defaults["prevalentHyp"]) else 1)
-        diabetes = st.selectbox("Diabetes?", options=[("Yes",1),("No",0)], format_func=lambda x:x[0], index=0 if int(defaults["diabetes"]) else 1)
+        BPMeds = st.selectbox("On BP medication?", options=["💊 Yes","💊 No"] , index=0 if st.session_state.get("BPMeds","💊")== "💊" else 1)
+        prevalentStroke = st.selectbox("Stroke history?", options=["🧠 Yes","🧠 No"], index=0 if st.session_state.get("prevalentStroke","🧠")== "🧠" else 1)
+        prevalentHyp = st.selectbox("Hypertension?", options=["⚡ Yes","⚡ No"], index=0 if st.session_state.get("prevalentHyp","⚡")== "⚡" else 1)
+        diabetes = st.selectbox("Diabetes?", options=["🩸 Yes","🩸 No"], index=0 if st.session_state.get("diabetes","🩸")== "🩸" else 1)
 
     with right_col:
-        totChol = st.number_input("Total cholesterol", min_value=100.0, max_value=600.0, value=float(defaults["totChol"]))
-        sysBP = st.number_input("Systolic BP", min_value=60.0, max_value=240.0, value=float(defaults["sysBP"]))
-        diaBP = st.number_input("Diastolic BP", min_value=30.0, max_value=140.0, value=float(defaults["diaBP"]))
-        heartRate = st.number_input("Heart Rate", min_value=30.0, max_value=200.0, value=float(defaults["heartRate"]))
-        BMI = st.number_input("BMI", min_value=10.0, max_value=60.0, value=float(defaults["BMI"]))
-        glucose = st.number_input("Glucose", min_value=40.0, max_value=400.0, value=float(defaults["glucose"]))
+        totChol = st.number_input("Total cholesterol", min_value=100.0, max_value=600.0, value=float(st.session_state.get("totChol", defaults["totChol"])))
+        sysBP = st.number_input("Systolic BP", min_value=60.0, max_value=240.0, value=float(st.session_state.get("sysBP", defaults["sysBP"])))
+        diaBP = st.number_input("Diastolic BP", min_value=30.0, max_value=140.0, value=float(st.session_state.get("diaBP", defaults["diaBP"])))
+        heartRate = st.number_input("Heart Rate", min_value=30.0, max_value=200.0, value=float(st.session_state.get("heartRate", defaults["heartRate"])))
+        BMI = st.number_input("BMI", min_value=10.0, max_value=60.0, value=float(st.session_state.get("BMI", defaults["BMI"])))
+        glucose = st.number_input("Glucose", min_value=40.0, max_value=400.0, value=float(st.session_state.get("glucose", defaults["glucose"])))
 
     st.markdown("</div>", unsafe_allow_html=True)
-
-    c1, c2, c3 = st.columns([1,1,1])
-    with c1:
+    col_a, col_b, col_c = st.columns([1,1,1])
+    with col_a:
         predict_btn = st.form_submit_button("🔍 Predict Risk")
-    with c2:
+    with col_b:
         compare_mode = st.checkbox("Enable Before / After comparison", value=False)
-    with c3:
+    with col_c:
         save_session = st.checkbox("Save to session history", value=True)
 
-# Apply presets safely (outside form rerun)
-if preset != "Custom" and not st.session_state.get("preset_applied", False):
-    if preset == "Healthy (demo)":
-        st.session_state.update({"age":40,"currentSmoker":("No",0),"cigsPerDay":0,"totChol":170,"sysBP":120,"diaBP":76,"BMI":22,"glucose":90,"heartRate":72})
-    elif preset == "High-risk smoker":
-        st.session_state.update({"age":62,"currentSmoker":("Yes",1),"cigsPerDay":25,"totChol":270,"sysBP":155,"diaBP":96,"BMI":31,"glucose":145,"heartRate":92})
-    elif preset == "Elderly hypertensive":
-        st.session_state.update({"age":73,"currentSmoker":("No",0),"cigsPerDay":0,"totChol":260,"sysBP":170,"diaBP":98,"BMI":28,"glucose":130,"heartRate":86})
-    st.session_state["preset_applied"] = True
-    st.rerun()
-
-# session history
+# session history init
 if 'history' not in st.session_state:
     st.session_state['history'] = []
 
-def build_input_dict():
-    gval = gender[1] if isinstance(gender, tuple) else gender
-    cur_sm = currentSmoker[1] if isinstance(currentSmoker, tuple) else currentSmoker
+def emoji_to_binary_gender(s: str):
+    return 1 if s.startswith("👨") else 0
+
+def emoji_to_binary_smoker(s: str):
+    return 1 if s.startswith("🚬") else 0
+
+def yes_no_emoji_to_binary(s: str):
+    # Accept "💊 Yes" / "💊 No" or "🧠 Yes"/"🧠 No" etc.
+    return 1 if s.endswith("Yes") else 0
+
+def build_input_dict_from_form():
+    male = emoji_to_binary_gender(gender)
+    smoker = emoji_to_binary_smoker(currentSmoker)
+    bpm = 1 if BPMeds.startswith("💊") and BPMeds.endswith("Yes") else (0 if BPMeds.endswith("No") else 0)
+    stroke = 1 if prevalentStroke.endswith("Yes") else 0
+    hyp = 1 if prevalentHyp.endswith("Yes") else 0
+    diab = 1 if diabetes.endswith("Yes") else 0
+
     data = {
         "age": float(age),
-        "male": float(gval),
+        "male": float(male),
         "education": float(education),
-        "currentSmoker": float(cur_sm),
+        "currentSmoker": float(smoker),
         "cigsPerDay": float(cigsPerDay),
-        "BPMeds": float(BPMeds[1]) if isinstance(BPMeds, tuple) else float(BPMeds),
-        "prevalentStroke": float(prevalentStroke[1]) if isinstance(prevalentStroke, tuple) else float(prevalentStroke),
-        "prevalentHyp": float(prevalentHyp[1]) if isinstance(prevalentHyp, tuple) else float(prevalentHyp),
-        "diabetes": float(diabetes[1]) if isinstance(diabetes, tuple) else float(diabetes),
+        "BPMeds": float(bpm),
+        "prevalentStroke": float(stroke),
+        "prevalentHyp": float(hyp),
+        "diabetes": float(diab),
         "totChol": float(totChol),
         "sysBP": float(sysBP),
         "diaBP": float(diaBP),
@@ -421,22 +392,22 @@ def build_input_dict():
     return data
 
 # ---------------------------
-# Prediction logic (safe)
+# Prediction (safe & aligned)
 # ---------------------------
 if predict_btn:
-    inputs = build_input_dict()
-    # align features to training
+    inputs = build_input_dict_from_form()
+    # align features (ensures matching columns/order)
     try:
         X_df = align_features(pd.DataFrame([inputs]), FEATURE_NAMES)
     except Exception:
-        X_df = pd.DataFrame([inputs])  # fallback
+        X_df = pd.DataFrame([inputs])
 
-    # lightweight loader
+    # quick loader
     with st.container():
         st.markdown('<div class="card" style="padding:10px;">', unsafe_allow_html=True)
         st.markdown("<div style='display:flex; gap:12px; align-items:center;'><div style='width:56px; height:56px;'><svg viewBox='0 0 100 100' width='48' height='48'><circle cx='50' cy='50' r='20' stroke='rgba(255,255,255,0.06)' stroke-width='4' fill='none'></circle></svg></div><div><strong>Predicting risk...</strong><div class='muted'>Running model & explainability</div></div></div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
-    time.sleep(0.6)
+    time.sleep(0.5)
 
     try:
         prob = predict_prob_single(X_df)
@@ -445,13 +416,13 @@ if predict_btn:
         st.error(f"Prediction failed: {e}")
         st.stop()
 
-    # save session
+    # save history
     hist_item = {"timestamp": datetime.now().isoformat(timespec='seconds'), "inputs": inputs, "prob": prob, "label": label}
     if save_session:
         st.session_state['history'].insert(0, hist_item)
-        st.session_state['history'] = st.session_state['history'][:30]
+        st.session_state['history'] = st.session_state['history'][:40]
 
-    # Top insights cards (neumorphic)
+    # Top cards
     col1, col2, col3 = st.columns([1,2,1], gap="large")
     with col1:
         st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -479,7 +450,6 @@ if predict_btn:
             st.markdown("<div class='muted'>Calculated on test split / dataset</div>", unsafe_allow_html=True)
         else:
             st.markdown("<div class='muted'>Accuracy: N/A</div>", unsafe_allow_html=True)
-        # PDF export
         if st.button("📥 Download PDF Report"):
             try:
                 pdf_bytes = build_pdf(bytes_flag=True, inputs=inputs, prob=prob, label=label)
@@ -492,7 +462,7 @@ if predict_btn:
 
     st.markdown("<div class='soft-divider'></div>", unsafe_allow_html=True)
 
-    # Visual area: gauge + explainability
+    # Visuals: gauge + explainability
     left_viz, right_viz = st.columns([2,1], gap="large")
     with left_viz:
         fig_g = create_dual_gauge(prob)
@@ -508,7 +478,6 @@ if predict_btn:
 
         use_permutation = False
 
-        # SHAP preferred path
         if SHAP_AVAILABLE:
             try:
                 explainer = shap.TreeExplainer(model)
@@ -522,17 +491,17 @@ if predict_btn:
                 st.markdown(plot_feature_chips(top6), unsafe_allow_html=True)
                 df_bar = pd.DataFrame({"feature": list(top6.keys()), "impact": [top6[k] for k in top6]})
                 st.plotly_chart(px.bar(df_bar, x="impact", y="feature", orientation="h", height=260), use_container_width=True)
-            except Exception as e:
+            except Exception:
                 st.warning("SHAP failed — switching to permutation importance")
                 use_permutation = True
         else:
             st.warning("SHAP not available — using permutation importance fallback")
             use_permutation = True
 
-        # Permutation importance (reliable) using aligned test batch
         if use_permutation:
             try:
                 from sklearn.inspection import permutation_importance
+                # Use aligned test batch for stability
                 if TEST_SPLIT is not None:
                     X_test, y_test = TEST_SPLIT
                     X_test_aligned = align_features(X_test, FEATURE_NAMES)
@@ -553,7 +522,6 @@ if predict_btn:
                 else:
                     fallback_names = [f"f_{i}" for i in range(len(pi_vals))]
                     df_pi = pd.DataFrame({"feature": fallback_names, "importance": pi_vals}).sort_values("importance", ascending=False)
-
                 st.plotly_chart(px.bar(df_pi, x="importance", y="feature", orientation="h", height=260), use_container_width=True)
             except Exception as e:
                 st.error(f"Permutation importance failed: {e}")
@@ -561,7 +529,7 @@ if predict_btn:
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # Comparison (simulate improvements)
+    # Comparison simulation
     if compare_mode:
         st.markdown("<div style='margin-top:12px;' class='card'>", unsafe_allow_html=True)
         st.markdown("### Before → After (simulate interventions)")
@@ -586,7 +554,7 @@ if predict_btn:
         st.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------------------
-# Session preview & history
+# Session history preview
 # ---------------------------
 st.markdown("<div style='margin-top:14px;' class='card'>", unsafe_allow_html=True)
 st.markdown("### Model input preview")
@@ -598,7 +566,7 @@ else:
     st.markdown("<div class='muted'>No saved sessions — make a prediction and check 'Save to session history'.</div>", unsafe_allow_html=True)
 st.markdown("</div>", unsafe_allow_html=True)
 
-with st.expander("Session history (last 30)"):
+with st.expander("Session history (last 40)"):
     for idx, h in enumerate(st.session_state['history']):
         cols = st.columns([2,1,1])
         cols[0].markdown(f"**{h['timestamp']}** — {h['label']} — {h['prob']:.2f}")
